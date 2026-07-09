@@ -23,7 +23,7 @@
     --paper:#F5F6F8;      /* холодный светлый фон */
     --card:#FFFFFF;
     --star:#F0A32B;       /* янтарь рейтинговых звёзд — акцент из мира селлера */
-    --reply:#1F7A4D;      /* зелёный «ответ продавца» */
+    --reply:#1F7A4D;      /* зелёный: выход продукта */
     --muted:#5B6470;
     --line:#E3E6EB;
   }
@@ -83,15 +83,15 @@
   <p class="thanks" id="thanks">Вы в списке ранних. Напишем одно письмо — когда откроем доступ.</p>
 </header>
 
-<div class="demo" aria-label="Пример: отзыв покупателя и ответ сервиса">
-  <div class="demo-head"><span>{{DEMO_LEFT_LABEL}}</span><span>отвечено за 3 сек</span></div>
+<div class="demo" aria-label="Пример работы продукта">
+  <div class="demo-head"><span>{{DEMO_LEFT_LABEL}}</span><span>{{DEMO_HEAD_RIGHT}}</span></div>
   <div class="review">
-    <div class="stars" aria-label="оценка 1 из 5">★☆☆☆☆</div>
+    <div class="stars">{{DEMO_LEFT_BADGE}}</div>
     <p>{{DEMO_LEFT_TEXT}}</p>
-    <div class="who">Марина, вчера в 23:47</div>
+    <div class="who">{{DEMO_LEFT_META}}</div>
   </div>
   <div class="reply">
-    <span class="tag">ответ продавца · черновик готов</span>
+    <span class="tag">{{DEMO_RIGHT_TAG}}</span>
     <p><span id="typed"></span><span class="caret" id="caret"></span></p>
   </div>
 </div>

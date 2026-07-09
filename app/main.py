@@ -69,6 +69,22 @@ class SmokeProject(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+STAGE_NAMES = ["Оффер", "Спрос", "Активация", "Первая ценность",
+               "Мост к деньгам", "Оплата", "Масштаб", "Удержание"]
+
+
+class TrackedProject(SQLModel, table=True):
+    """Внешний проект в кабинете: живёт не в Создателе (например, АвтоПост
+    ведёт Аналитик в Telegram), но виден на общей карте портфеля со своим
+    этапом. Мост, а не переезд: ссылка ведёт в родной интерфейс проекта."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    stage: int = 0                 # 0..7, индекс в STAGE_NAMES
+    status_note: str = ""          # одна строка: что происходит сейчас
+    external_link: str = ""        # куда идти за деталями (бот, кабинет)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class SmokeEvent(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     idea: str = Field(index=True)
@@ -83,7 +99,7 @@ class SmokeEvent(SQLModel, table=True):
 
 SQLModel.metadata.create_all(engine)
 
-app = FastAPI(title="Создатель", version="0.2")
+app = FastAPI(title="Создатель", version="0.4")
 
 # Ключ владельца: закрывает генерацию офферов, запуск и удаление лендингов.
 # Публичными остаются только /l/{id}, /api/smoke-event, /health -- им и
@@ -134,6 +150,10 @@ def render_landing(offer: dict) -> str:
             .replace("{{H1}}", offer["h1"])
             .replace("{{SUB}}", offer["sub"])
             .replace("{{DEMO_LEFT_LABEL}}", offer["demo_left_label"])
+            .replace("{{DEMO_HEAD_RIGHT}}", offer.get("demo_head_right", "готово за секунды"))
+            .replace("{{DEMO_LEFT_BADGE}}", offer.get("demo_left_badge", ""))
+            .replace("{{DEMO_LEFT_META}}", offer.get("demo_left_meta", ""))
+            .replace("{{DEMO_RIGHT_TAG}}", offer.get("demo_right_tag", "результат · черновик готов"))
             .replace("{{DEMO_LEFT_TEXT}}", offer["demo_left_text"])
             .replace("{{DEMO_RIGHT_TEXT_JSON}}", json.dumps(offer["demo_right_text"], ensure_ascii=False))
             .replace("{{PAINS_HTML}}", pains_html)
@@ -287,6 +307,81 @@ def delete_project(idea_id: str, request: Request):
         s.delete(proj)
         s.commit()
     return {"ok": True, "deleted": idea_id}
+
+
+class TrackedIn(BaseModel):
+    name: str
+    stage: int = 0
+    status_note: str = ""
+    external_link: str = ""
+
+
+@app.post("/api/tracked")
+def add_tracked(data: TrackedIn, request: Request):
+    _check_owner(request)
+    if not (0 <= data.stage <= 7):
+        raise HTTPException(400, "stage: 0..7")
+    if not data.name.strip():
+        raise HTTPException(400, "нужно имя проекта")
+    tp = TrackedProject(name=data.name.strip()[:80], stage=data.stage,
+                        status_note=data.status_note.strip()[:200],
+                        external_link=data.external_link.strip()[:300])
+    with Session(engine) as s:
+        s.add(tp); s.commit(); s.refresh(tp)
+    return {"ok": True, "id": tp.id}
+
+
+@app.patch("/api/tracked/{tp_id}")
+def update_tracked(tp_id: int, data: TrackedIn, request: Request):
+    _check_owner(request)
+    with Session(engine) as s:
+        tp = s.get(TrackedProject, tp_id)
+        if tp is None:
+            raise HTTPException(404, "проект не найден")
+        tp.name = data.name.strip()[:80] or tp.name
+        tp.stage = data.stage if 0 <= data.stage <= 7 else tp.stage
+        tp.status_note = data.status_note.strip()[:200]
+        tp.external_link = data.external_link.strip()[:300]
+        s.add(tp); s.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/tracked/{tp_id}")
+def delete_tracked(tp_id: int, request: Request):
+    _check_owner(request)
+    with Session(engine) as s:
+        tp = s.get(TrackedProject, tp_id)
+        if tp is None:
+            raise HTTPException(404, "проект не найден")
+        s.delete(tp); s.commit()
+    return {"ok": True}
+
+
+@app.get("/api/cabinet")
+def cabinet(request: Request):
+    """Портфель целиком: внешние проекты + smoke-тесты Создателя.
+    Smoke-этап определяется данными: есть клики -> ① Спрос, иначе ⓪ Оффер."""
+    _check_owner(request)
+    out = {"stages": STAGE_NAMES, "tracked": [], "smoke": []}
+    with Session(engine) as s:
+        for tp in s.exec(select(TrackedProject).order_by(TrackedProject.created_at)).all():
+            out["tracked"].append({"id": tp.id, "name": tp.name, "stage": tp.stage,
+                                   "stage_name": STAGE_NAMES[tp.stage],
+                                   "note": tp.status_note, "link": tp.external_link})
+        for p in s.exec(select(SmokeProject).order_by(SmokeProject.created_at.desc())).all():
+            views = len(s.exec(select(SmokeEvent.id).where(
+                SmokeEvent.idea == p.idea_id, SmokeEvent.event == "page_view")).all())
+            leads = len(s.exec(select(SmokeEvent.id).where(
+                SmokeEvent.idea == p.idea_id, SmokeEvent.event == "lead_submitted")).all())
+            stage = 1 if views > 0 else 0
+            v = compute_verdict(views, leads, p.click_target,
+                                p.lead_rate_signal, p.lead_rate_dead)
+            out["smoke"].append({"idea_id": p.idea_id, "name": p.product_name,
+                                 "stage": stage, "stage_name": STAGE_NAMES[stage],
+                                 "views": views, "leads": leads,
+                                 "target": p.click_target, "verdict": v["verdict"],
+                                 "landing_url": f"/l/{p.idea_id}"})
+    return out
 
 
 @app.get("/health")

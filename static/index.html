@@ -29,6 +29,25 @@
   h1 em{font-style:normal;color:var(--accent)}
   .sub{color:var(--muted);max-width:36em;font-size:18px}
 
+  /* Кабинет: мои проекты */
+  .cab{margin:36px 0 8px}
+  .cab h2{font:600 13px "JetBrains Mono",monospace;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+  .proj{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;margin-bottom:10px;display:flex;flex-wrap:wrap;
+    gap:8px 16px;align-items:center}
+  .proj .pname{font:600 16px "Onest",sans-serif;flex:1 1 160px}
+  .proj .strip{font:700 13px "JetBrains Mono",monospace;letter-spacing:3px;color:var(--muted)}
+  .proj .strip b{color:var(--accent)}
+  .proj .pnote{flex-basis:100%;font-size:14px;color:var(--muted)}
+  .proj a{color:var(--accent);font-size:14px}
+  .cab .add{background:transparent;border:1.5px dashed var(--line);color:var(--muted);
+    border-radius:12px;padding:12px;width:100%;font:500 15px "Onest",sans-serif;cursor:pointer}
+  .cab .add:hover{border-color:var(--accent);color:var(--accent)}
+  .cab .loadbtn{border:1.5px solid var(--line);background:transparent;color:var(--muted);
+    border-radius:10px;padding:11px 16px;font:500 15px "Onest",sans-serif;cursor:pointer}
+  .cab .loadbtn:hover{border-color:var(--accent);color:var(--accent)}
+
   /* Карта пути: вертикальная лестница этапов */
   .path{margin:40px 0;display:grid;gap:0}
   .stage{display:grid;grid-template-columns:56px 1fr;gap:16px;padding:14px 0;
@@ -89,6 +108,12 @@
   проверочный лендинг и вынесет вердикт по живому спросу. До того, как вы
   потратите на продукт полгода.</p>
 
+  <div class="cab" id="cab">
+    <h2>Мои проекты</h2>
+    <button class="loadbtn" id="loadCab">Показать портфель (нужен ключ владельца)</button>
+    <div id="cabList"></div>
+  </div>
+
   <div class="path" id="path">
     <div class="stage active"><span class="num">0</span>
       <div style="grid-column:2">
@@ -145,6 +170,52 @@ async function ownerFetch(url, opts){
   if(r.status === 401){ OWNER_KEY = ""; throw new Error("Неверный ключ владельца — попробуйте ещё раз."); }
   return r;
 }
+
+const STAGE_ICONS = ["0","1","2","3","4","5","6","7"];
+function stageStrip(active){
+  return STAGE_ICONS.map((s,i)=> i===active? `<b>[${s}]</b>` : s).join(" ");
+}
+async function loadCabinet(){
+  const list = document.getElementById("cabList");
+  try{
+    const r = await ownerFetch("/api/cabinet");
+    const data = await r.json();
+    list.innerHTML = "";
+    data.tracked.forEach(t => {
+      const d = document.createElement("div"); d.className = "proj";
+      d.innerHTML = `<span class="pname">${t.name}</span>
+        <span class="strip">${stageStrip(t.stage)}</span>
+        <span class="pnote">Этап ${t.stage} · ${t.stage_name}${t.note? " — "+t.note : ""}
+        ${t.link? ` · <a href="${t.link}" target="_blank">открыть</a>` : ""}</span>`;
+      list.appendChild(d);
+    });
+    data.smoke.forEach(sm => {
+      const d = document.createElement("div"); d.className = "proj";
+      d.innerHTML = `<span class="pname">${sm.name}</span>
+        <span class="strip">${stageStrip(sm.stage)}</span>
+        <span class="pnote">Этап ${sm.stage} · ${sm.stage_name} — ${sm.views}/${sm.target} визитов,
+        заявок ${sm.leads} · ${sm.verdict} · <a href="${sm.landing_url}" target="_blank">лендинг</a></span>`;
+      list.appendChild(d);
+    });
+    const add = document.createElement("button"); add.className = "add";
+    add.textContent = "+ добавить внешний проект (например, АвтоПост)";
+    add.onclick = addTracked;
+    list.appendChild(add);
+    document.getElementById("loadCab").style.display = "none";
+  }catch(e){
+    list.innerHTML = `<p class="note">⚠ ${e.message}</p>`;
+  }
+}
+async function addTracked(){
+  const name = prompt("Название проекта:"); if(!name) return;
+  const stage = parseInt(prompt("Этап 0-7 (0 Оффер · 1 Спрос · 2 Активация · 3 Первая ценность · 4 Мост · 5 Оплата · 6 Масштаб · 7 Удержание):", "0")||"0");
+  const note = prompt("Одной строкой: что происходит сейчас?", "") || "";
+  const link = prompt("Ссылка (бот/кабинет), можно пусто:", "") || "";
+  await ownerFetch("/api/tracked", {method:"POST",
+    body: JSON.stringify({name, stage, status_note: note, external_link: link})});
+  loadCabinet();
+}
+document.getElementById("loadCab").addEventListener("click", loadCabinet);
 
 const ideaEl = document.getElementById("idea");
 const go = document.getElementById("go");

@@ -186,3 +186,73 @@ class TestTimeoutRetry:
         with pytest.raises(OfferEngineError) as e:
             asyncio.run(sharpen_idea("Достаточно длинная идея для проверки", _post=always_slow))
         assert "долго" in str(e.value)
+
+
+class TestUniversalDemoCard:
+    def test_render_with_custom_demo_fields(self):
+        offer = dict(VALID_OFFER, idea_id="rob_v1",
+                     demo_left_label="бриф игрока № 214",
+                     demo_left_badge="входящий бриф",
+                     demo_left_meta="игрок, сегодня",
+                     demo_right_tag="концепт готов · 3 варианта",
+                     demo_head_right="готово за 40 сек")
+        html = render_landing(offer)
+        assert "{{" not in html
+        assert "бриф игрока № 214" in html
+        assert "концепт готов · 3 варианта" in html
+        assert "ответ продавца" not in html, "наследие отзывов вычищено"
+        assert "★" not in html, "звёзды не появляются без запроса"
+
+    def test_render_old_offer_gets_defaults(self):
+        html = render_landing(dict(VALID_OFFER, idea_id="old_v1"))
+        assert "{{" not in html
+        assert "результат · черновик готов" in html
+        assert "готово за секунды" in html
+
+    def test_validator_defaults(self):
+        data = _validate({"offers": [dict(VALID_OFFER, idea_id=f"d{i}") for i in range(3)]})
+        for o in data["offers"]:
+            assert o["demo_right_tag"] and o["demo_head_right"]
+
+
+class TestCabinet:
+    def test_tracked_crud_and_cabinet(self):
+        r = client.post("/api/tracked", headers=OWNER, json={
+            "name": "АвтоПост", "stage": 3,
+            "status_note": "эксперимент первого поста, 0/10 отзывов",
+            "external_link": "https://t.me/Trpst_bot"})
+        assert r.status_code == 200
+        tp_id = r.json()["id"]
+
+        cab = client.get("/api/cabinet", headers=OWNER).json()
+        tracked = [t for t in cab["tracked"] if t["id"] == tp_id][0]
+        assert tracked["stage_name"] == "Первая ценность"
+        assert cab["stages"][0] == "Оффер" and len(cab["stages"]) == 8
+
+        r = client.patch(f"/api/tracked/{tp_id}", headers=OWNER, json={
+            "name": "АвтоПост", "stage": 4, "status_note": "мост подтверждается"})
+        assert r.status_code == 200
+        cab = client.get("/api/cabinet", headers=OWNER).json()
+        assert [t for t in cab["tracked"] if t["id"] == tp_id][0]["stage"] == 4
+
+        assert client.delete(f"/api/tracked/{tp_id}", headers=OWNER).status_code == 200
+
+    def test_smoke_stage_from_data(self):
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="cab_v1")})
+        cab = client.get("/api/cabinet", headers=OWNER).json()
+        sm = [s for s in cab["smoke"] if s["idea_id"] == "cab_v1"][0]
+        assert sm["stage"] == 0  # кликов нет — этап Оффер
+        client.post("/api/smoke-event", json={"event": "page_view", "idea": "cab_v1"})
+        cab = client.get("/api/cabinet", headers=OWNER).json()
+        sm = [s for s in cab["smoke"] if s["idea_id"] == "cab_v1"][0]
+        assert sm["stage"] == 1 and sm["stage_name"] == "Спрос"
+
+    def test_cabinet_requires_key(self):
+        assert client.get("/api/cabinet").status_code == 401
+
+    def test_tracked_validation(self):
+        assert client.post("/api/tracked", headers=OWNER,
+                           json={"name": "x", "stage": 9}).status_code == 400
+        assert client.post("/api/tracked", headers=OWNER,
+                           json={"name": "  ", "stage": 1}).status_code == 400
