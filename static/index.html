@@ -105,18 +105,11 @@
 </head>
 <body>
 <div class="wrap">
-  <span class="stamp">Создатель · чертёж № 0.5</span> <a href="/portfolio" style="float:right;color:var(--accent);font:500 15px Onest">Портфель →</a>
+  <span class="stamp">Создатель · чертёж № 0.5</span> <a href="/desk" style="float:right;color:var(--accent);font:500 15px Onest">Рабочий стол →</a>
   <h1>От идеи — до денег.<br>По этапам, <em>которые нельзя перепрыгнуть.</em></h1>
   <p class="sub">Опишите идею — Создатель заострит оффер, соберёт и захостит
   проверочный лендинг и вынесет вердикт по живому спросу. До того, как вы
   потратите на продукт полгода.</p>
-
-  <div class="cab" id="desk" style="display:none;margin:36px 0 8px">
-    <h2 style="font:600 13px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Рабочий стол · мои проекты</h2>
-    <div id="deskList"></div>
-    <h2 style="font:600 13px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:22px 0 12px">Запустить проверку в один клик · готовые офферы</h2>
-    <div id="deskPresets" style="display:grid;gap:12px"></div>
-  </div>
 
   <div class="path" id="path">
     <div class="stage active"><span class="num">0</span>
@@ -194,8 +187,74 @@ function applyKey(){
   OWNER_KEY = document.getElementById("keyInput").value.trim();
   if(OWNER_KEY){
     sessionStorage.setItem("sozdatel_key", OWNER_KEY);
-    document.getElementById("gate").style.display = "none";
-    initDesk();
+    location.href = "/desk";
+  }
+}
+async function joinWaitlist(){
+  const c = document.getElementById("wlContact").value.trim();
+  const msg = document.getElementById("wlMsg");
+  if(c.length < 4){ msg.textContent = "Оставьте email или @telegram."; return; }
+  try{
+    const r = await fetch("/api/waitlist", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({contact:c})});
+    msg.textContent = r.ok ? "Вы в списке. Напишем, когда откроем доступ." : "Не получилось, попробуйте позже.";
+    if(r.ok) document.getElementById("wlContact").value = "";
+  }catch(e){ msg.textContent = "Не получилось, попробуйте позже."; }
+}
+async function ownerFetch(url, opts){
+  const r = await fetch(url, Object.assign({headers: ownerHeaders()}, opts||{}));
+  if(r.status === 401){ OWNER_KEY = ""; throw new Error("Неверный ключ владельца — попробуйте ещё раз."); }
+  return r;
+}
+
+const STAGE_ICONS = ["0","1","2","3","4","5","6","7"];
+function stageStrip(active){
+  return STAGE_ICONS.map((s,i)=> i===active? `<b>[${s}]</b>` : s).join(" ");
+}
+async function loadCabinet(){
+  const list = document.getElementById("cabList");
+  try{
+    const r = await ownerFetch("/api/cabinet");
+    const data = await r.json();
+    list.innerHTML = "";
+    data.tracked.forEach(t => {
+      const d = document.createElement("div"); d.className = "proj";
+      d.innerHTML = `<span class="pname">${t.name}</span>
+        <span class="strip">${stageStrip(t.stage)}</span>
+        <span class="pnote">Этап ${t.stage} · ${t.stage_name}${t.note? " — "+t.note : ""}
+        ${t.link? ` · <a href="${t.link}" target="_blank">открыть</a>` : ""}</span>`;
+      list.appendChild(d);
+    });
+    data.smoke.forEach(sm => {
+      const d = document.createElement("div"); d.className = "proj";
+      d.innerHTML = `<span class="pname">${sm.name}</span>
+        <span class="strip">${stageStrip(sm.stage)}</span>
+        <span class="pnote">Этап ${sm.stage} · ${sm.stage_name} — ${sm.views}/${sm.target} визитов,
+        заявок ${sm.leads} · ${sm.verdict} · <a href="${sm.landing_url}" target="_blank">лендинг</a></span>`;
+      list.appendChild(d);
+    });
+    const add = document.createElement("button"); add.className = "add";
+    add.textContent = "+ добавить внешний проект (например, АвтоПост)";
+    add.onclick = addTracked;
+    list.appendChild(add);
+    document.getElementById("loadCab").style.display = "none";
+  }catch(e){
+    list.innerHTML = `<p class="note">⚠ ${e.message}</p>`;
+  }
+}
+async function addTracked(){
+  const name = prompt("Название проекта:"); if(!name) return;
+  const stage = parseInt(prompt("Этап 0-7 (0 Оффер · 1 Спрос · 2 Активация · 3 Первая ценность · 4 Мост · 5 Оплата · 6 Масштаб · 7 Удержание):", "0")||"0");
+  const note = prompt("Одной строкой: что происходит сейчас?", "") || "";
+  const link = prompt("Ссылка (бот/кабинет), можно пусто:", "") || "";
+  await ownerFetch("/api/tracked", {method:"POST",
+    body: JSON.stringify({name, stage, status_note: note, external_link: link})});
+  loadCabinet();
+}
+
+
+/* Владелец с ключом сразу идёт на рабочий стол — лендинг ему не нужен */
+if(sessionStorage.getItem("sozdatel_key")) location.replace("/desk");
   }
 }
 async function joinWaitlist(){
@@ -264,57 +323,7 @@ async function addTracked(){
 function stageStripHome(active){
   return [0,1,2,3,4,5,6,7].map(i=> i===active? `<b style="color:var(--accent)">[${i}]</b>`:i).join(" ");
 }
-async function initDesk(){
-  if(!OWNER_KEY) return;
-  try{
-    const r = await fetch("/api/cabinet", {headers:{"X-Owner-Key": OWNER_KEY}});
-    if(!r.ok) return;
-    const d = await r.json();
-    const list = document.getElementById("deskList"); list.innerHTML = "";
-    const card = (inner, onclick) => {
-      const el = document.createElement("div");
-      el.style.cssText = "background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px" + (onclick? ";cursor:pointer":"");
-      if(onclick) el.onclick = onclick;
-      el.innerHTML = inner; return el;
-    };
-    d.tracked.forEach(t => list.appendChild(card(
-      `<div style="font:600 17px Onest">${t.name}</div>
-       <div style="font:700 13px 'JetBrains Mono',monospace;letter-spacing:3px;color:var(--muted);margin:6px 0">${stageStripHome(t.stage)}</div>
-       <div style="font-size:14px;color:var(--muted)">Этап ${t.stage} · ${t.stage_name}${t.note? " — "+t.note:""}</div>`,
-      t.link ? ()=>window.open(t.link,"_blank") : null)));
-    d.smoke.forEach(s => list.appendChild(card(
-      `<div style="font:600 17px Onest">${s.name}</div>
-       <div style="font:700 13px 'JetBrains Mono',monospace;letter-spacing:3px;color:var(--muted);margin:6px 0">${stageStripHome(s.stage)}</div>
-       <div style="font-size:14px;color:var(--muted)">${s.views}/${s.target} визитов · заявок ${s.leads} · <span style="color:var(--accent)">${s.verdict}</span></div>`,
-      ()=>location.href=`/p/${s.idea_id}`)));
-    if(d.waitlist && d.waitlist.count)
-      list.appendChild(card(`<div style="font-size:14px;color:var(--muted)">Лист ожидания Создателя: <b style="color:var(--ink)">${d.waitlist.count}</b> контактов</div>`, null));
 
-    const pr = await fetch("/api/presets", {headers:{"X-Owner-Key": OWNER_KEY}});
-    if(pr.ok){
-      const pd = await pr.json();
-      const box = document.getElementById("deskPresets"); box.innerHTML = "";
-      pd.presets.forEach(o => {
-        const el = document.createElement("div"); el.className = "offer";
-        el.innerHTML = `<span class="angle">${o.angle}</span>
-          <h4>${o.product_name}</h4><p>${o.sub}</p>`;
-        const b = document.createElement("button");
-        b.textContent = `Запустить «${o.product_name}»`;
-        b.onclick = async () => {
-          b.disabled = true; b.textContent = "Запускаю…";
-          const r = await fetch("/api/launch", {method:"POST", headers: ownerHeaders(),
-            body: JSON.stringify({idea_text: "preset:"+o.idea_id, offer: o})});
-          const data = await r.json();
-          if(data.ok) location.href = `/p/${data.idea_id}`;
-          else { b.disabled = false; b.textContent = `Запустить «${o.product_name}»`; }
-        };
-        el.appendChild(b); box.appendChild(el);
-      });
-    }
-    document.getElementById("desk").style.display = "block";
-  }catch(e){ /* нет ключа/сети — остаёмся лендингом */ }
-}
-initDesk();
 
 const ideaEl = document.getElementById("idea");
 const go = document.getElementById("go");

@@ -289,7 +289,7 @@ class TestProjectPages:
         assert r.status_code == 200 and "Портфель" in r.text
         home = client.get("/").text
         assert "Мои проекты" not in home            # кабинет ушёл с главной
-        assert "/portfolio" in home                 # но ссылка есть
+        assert "/desk" in home                      # владельцу — на рабочий стол
 
     def test_verdict_includes_launch_data(self):
         r = client.get("/api/verdict/page_v1", headers=OWNER).json()
@@ -365,3 +365,36 @@ class TestPresets:
         assert "за 5 минут" in page
         assert "договор готов · 12 пунктов" in page
         assert "★" not in page.replace("★☆☆☆☆", "") or "★☆☆☆☆" not in page  # без звёзд отзывов
+
+
+class TestHealthVersion:
+    def test_health_reports_real_version(self):
+        r = client.get("/health").json()
+        assert r["version"] == app.version
+        assert r["version"] != "0.1" or app.version == "0.1"
+
+
+class TestDesk:
+    def test_desk_page_and_clean_index(self):
+        r = client.get("/desk")
+        assert r.status_code == 200
+        assert "Рабочий стол" in r.text
+        assert "следующий шаг" in r.text.lower() or "next" in r.text
+        home = client.get("/").text
+        assert "Рабочий стол · мои проекты" not in home   # стол ушёл с главной
+        assert "deskPresets" not in home                  # пресеты тоже
+        assert "path" in home and "Оффер" in home         # таймлайн остался гостю
+
+    def test_cabinet_has_next_step_and_progress(self):
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="desk_fresh_v1")})
+        cab = client.get("/api/cabinet", headers=OWNER).json()
+        s = [x for x in cab["smoke"] if x["idea_id"] == "desk_fresh_v1"][0]
+        assert s["next_step"].startswith("Запустить Директ")   # 0 визитов
+        assert s["progress"] == 0 and s["rate"] == 0
+        for _ in range(5):
+            client.post("/api/smoke-event", json={"event": "page_view", "idea": "desk_fresh_v1"})
+        cab = client.get("/api/cabinet", headers=OWNER).json()
+        s = [x for x in cab["smoke"] if x["idea_id"] == "desk_fresh_v1"][0]
+        assert "Копим клики" in s["next_step"]
+        assert s["progress"] in (12, 13)  # 5/40 = 12.5%, банковское округление

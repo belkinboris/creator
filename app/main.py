@@ -38,6 +38,15 @@ if DATABASE_URL.startswith("sqlite"):
     if DATABASE_URL in ("sqlite://", "sqlite:///:memory:"):
         from sqlalchemy.pool import StaticPool
         _engine_kwargs["poolclass"] = StaticPool  # одна БД на все соединения (тесты)
+else:
+    # Postgres: держим тёплый пул. Без pre_ping первый запрос после простоя
+    # ждёт таймаута мёртвого соединения -- отсюда были 10-секундные страницы.
+    _engine_kwargs.update(
+        pool_pre_ping=True,      # проверять живость соединения перед выдачей
+        pool_recycle=280,        # пересоздавать раз в ~5 мин (Railway рвёт idle)
+        pool_size=5, max_overflow=5,
+        connect_args={"connect_timeout": 5},
+    )
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 from app.offer_engine import OfferEngineError, sharpen_idea  # noqa: E402
@@ -99,7 +108,7 @@ class SmokeEvent(SQLModel, table=True):
 
 SQLModel.metadata.create_all(engine)
 
-app = FastAPI(title="Создатель", version="0.9")
+app = FastAPI(title="Создатель", version="0.9.4")
 
 # Ключ владельца: закрывает генерацию офферов, запуск и удаление лендингов.
 # Публичными остаются только /l/{id}, /api/smoke-event, /health -- им и
@@ -424,23 +433,42 @@ def cabinet(request: Request):
             out["tracked"].append({"id": tp.id, "name": tp.name, "stage": tp.stage,
                                    "stage_name": STAGE_NAMES[tp.stage],
                                    "note": tp.status_note, "link": tp.external_link})
+        # Все события одним запросом вместо 2×N (N+1 убивал время на Postgres)
+        from collections import defaultdict
+        counts: dict[tuple[str, str], int] = defaultdict(int)
+        for idea, event in s.exec(select(SmokeEvent.idea, SmokeEvent.event)).all():
+            counts[(idea, event)] += 1
+
         for p in s.exec(select(SmokeProject).order_by(SmokeProject.created_at.desc())).all():
-            views = len(s.exec(select(SmokeEvent.id).where(
-                SmokeEvent.idea == p.idea_id, SmokeEvent.event == "page_view")).all())
-            leads = len(s.exec(select(SmokeEvent.id).where(
-                SmokeEvent.idea == p.idea_id, SmokeEvent.event == "lead_submitted")).all())
+            views = counts[(p.idea_id, "page_view")]
+            leads = counts[(p.idea_id, "lead_submitted")]
             stage = 1 if views > 0 else 0
             v = compute_verdict(views, leads, p.click_target,
                                 p.lead_rate_signal, p.lead_rate_dead)
+            rate = (leads / views) if views else 0.0
+            if views == 0:
+                next_step = "Запустить Директ на лендинг — инструкция на странице проекта"
+            elif views < p.click_target:
+                next_step = f"Копим клики: {p.click_target - views} до вердикта. Ничего не менять."
+            elif v["verdict"] == "СИГНАЛ ЕСТЬ":
+                next_step = "Сигнал есть → идея в очередь на MVP"
+            elif v["verdict"] == "СПРОСА НЕТ":
+                next_step = "Спроса нет → остановить кампанию, идею в архив"
+            else:
+                next_step = "Серая зона → второй оффер на том же трафике"
             out["smoke"].append({"idea_id": p.idea_id, "name": p.product_name,
                                  "stage": stage, "stage_name": STAGE_NAMES[stage],
-                                 "views": views, "leads": leads,
+                                 "views": views, "leads": leads, "rate": round(rate * 100),
                                  "target": p.click_target, "verdict": v["verdict"],
-                                 "landing_url": f"/l/{p.idea_id}"})
+                                 "next_step": next_step,
+                                 "progress": min(100, round(views / p.click_target * 100)) if p.click_target else 0,
+                                 "landing_url": f"/l/{p.idea_id}",
+                                 "project_url": f"/p/{p.idea_id}"})
         wl = s.exec(select(SmokeEvent.contact).where(
             SmokeEvent.idea == "sozdatel_waitlist",
             SmokeEvent.event == "lead_submitted")).all()
         out["waitlist"] = {"count": len(wl), "contacts": list(wl)}
+        logger.info("cabinet: %d tracked, %d smoke", len(out["tracked"]), len(out["smoke"]))
     return out
 
 
@@ -527,6 +555,22 @@ async def waitlist(data: WaitlistIn, request: Request):
     return {"ok": True}
 
 
+@app.on_event("startup")
+def _warm_up() -> None:
+    """Прогрев: устанавливаем соединение с БД и читаем статику ДО первого
+    запроса пользователя. Без этого первый визит платил за всё сразу."""
+    try:
+        with Session(engine) as s:
+            s.exec(select(SmokeProject.id).limit(1)).first()
+    except Exception:
+        logger.exception("warm-up db failed (non-fatal)")
+    for name in ("index.html", "portfolio.html", "project.html"):
+        try:
+            _static(name)
+        except Exception:
+            logger.exception("warm-up static %s failed", name)
+
+
 @app.get("/favicon.ico")
 def favicon():
     from fastapi.responses import Response
@@ -537,12 +581,32 @@ def favicon():
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "sozdatel", "version": "0.1"}
+    # Версия берётся из app -- НЕ хардкодить: захардкоженная "0.1" один раз
+    # уже отправила владельца в часовую погоню за несуществующей проблемой.
+    return {"ok": True, "service": "sozdatel", "version": app.version}
+
+
+_STATIC_CACHE: dict[str, str] = {}
+
+
+def _static(name: str) -> str:
+    """Читаем файл с диска один раз за жизнь процесса."""
+    if name not in _STATIC_CACHE:
+        _STATIC_CACHE[name] = (BASE_DIR.parent / "static" / name).read_text()
+    return _STATIC_CACHE[name]
+
+
+@app.get("/desk", response_class=HTMLResponse)
+def desk_page():
+    """Рабочий стол владельца: все проекты одинаковыми карточками с цифрами,
+    текущим шагом и одним действием. Гость сюда не попадает (ключ)."""
+    return HTMLResponse(_static("desk.html"))
 
 
 @app.get("/portfolio", response_class=HTMLResponse)
 def portfolio_page():
-    return HTMLResponse((BASE_DIR.parent / "static" / "portfolio.html").read_text())
+    # Страница статическая: никаких обращений к БД. Данные подтянет /api/cabinet.
+    return HTMLResponse(_static("portfolio.html"))
 
 
 @app.get("/p/{idea_id}", response_class=HTMLResponse)
@@ -551,11 +615,11 @@ def project_page(idea_id: str):
         proj = s.exec(select(SmokeProject).where(SmokeProject.idea_id == idea_id)).first()
     if proj is None:
         raise HTTPException(404, "проект не найден")
-    tpl = (BASE_DIR.parent / "static" / "project.html").read_text()
+    tpl = _static("project.html")
     return HTMLResponse(tpl.replace("{{IDEA_ID}}", idea_id)
                            .replace("{{PRODUCT_NAME}}", proj.product_name))
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTMLResponse((BASE_DIR.parent / "static" / "index.html").read_text())
+    return HTMLResponse(_static("index.html"))

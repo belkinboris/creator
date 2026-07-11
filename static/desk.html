@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Рабочий стол — Создатель</title>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{--blueprint:#11263F;--line:rgba(214,228,244,.16);--ink:#EAF2FB;
+    --muted:#8FA6BF;--accent:#FF8A2A;--ok:#4CC38A;--card:#0C1D31}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--blueprint);
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:28px 28px;color:var(--ink);
+    font:400 17px/1.5 "Onest",system-ui,sans-serif;min-height:100vh}
+  .wrap{max-width:980px;margin:0 auto;padding:36px 20px 80px}
+  a{color:var(--accent);text-decoration:none}
+  .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:6px}
+  h1{font:700 clamp(26px,5vw,36px)/1.1 "Unbounded",sans-serif}
+  .sub{color:var(--muted);font-size:15px;margin-bottom:28px}
+
+  /* Одна сетка — все проекты одинаковыми карточками */
+  .grid{display:grid;gap:14px}
+  @media(min-width:720px){.grid{grid-template-columns:1fr 1fr}}
+  .p{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:18px;display:flex;flex-direction:column;gap:10px;position:relative}
+  .p .kind{font:400 11px "JetBrains Mono",monospace;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--muted)}
+  .p h2{font:700 21px "Unbounded",sans-serif}
+  .stage{font:700 12px "JetBrains Mono",monospace;letter-spacing:3px;color:var(--muted)}
+  .stage b{color:var(--accent)}
+  .stage .nm{letter-spacing:0;font-family:"Onest";font-weight:600;color:var(--ink);margin-left:8px}
+
+  /* Цифры — главное на карточке */
+  .nums{display:flex;gap:22px;margin-top:2px}
+  .n .v{font:700 30px/1 "Unbounded",sans-serif}
+  .n .l{font:400 11px "JetBrains Mono",monospace;text-transform:uppercase;
+    letter-spacing:.08em;color:var(--muted);margin-top:4px}
+  .bar{height:6px;background:#081526;border-radius:99px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--accent);border-radius:99px}
+  .verdict{font:700 12px "JetBrains Mono",monospace;color:var(--accent)}
+  .next{background:#081526;border-left:3px solid var(--accent);border-radius:0 8px 8px 0;
+    padding:10px 12px;font-size:14px;color:var(--ink)}
+  .next span{display:block;font:400 10px "JetBrains Mono",monospace;
+    text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:3px}
+  .acts{margin-top:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .btn{border:1.5px solid var(--accent);background:transparent;color:var(--accent);
+    border-radius:9px;padding:9px 14px;font:600 14px "Onest";cursor:pointer}
+  .btn:hover{background:var(--accent);color:#1A0E00}
+  .btn.ghost{border-color:var(--line);color:var(--muted)}
+  .btn.ghost:hover{background:transparent;border-color:var(--accent);color:var(--accent)}
+
+  .new{border:1.5px dashed var(--line);border-radius:14px;padding:18px;
+    display:flex;flex-direction:column;justify-content:center;gap:8px;min-height:150px}
+  .new h2{font:700 19px "Unbounded",sans-serif;color:var(--muted)}
+  .new p{font-size:14px;color:var(--muted)}
+  .wl{margin-top:22px;font-size:14px;color:var(--muted)}
+  #gate{max-width:420px;margin:60px auto;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;padding:22px}
+  #gate input{width:100%;padding:12px;margin:10px 0;border:1.5px solid var(--line);
+    border-radius:9px;background:#081526;color:var(--ink);font:inherit}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="gate">
+    <h2 style="font:700 20px Unbounded;margin-bottom:6px">Рабочий стол</h2>
+    <p style="color:var(--muted);font-size:14px">Введите ключ владельца.</p>
+    <input type="password" id="key" placeholder="Ключ доступа">
+    <button class="btn" onclick="enter()">Войти</button>
+  </div>
+
+  <div id="desk" style="display:none">
+    <div class="top">
+      <h1>Рабочий стол</h1>
+      <a href="/">Как это работает →</a>
+    </div>
+    <p class="sub">Каждый проект — где он, что показывают цифры и что делать дальше.</p>
+    <div class="grid" id="grid"></div>
+    <p class="wl" id="wl"></p>
+  </div>
+</div>
+
+<script>
+let KEY = sessionStorage.getItem("sozdatel_key") || "";
+const STAGES = ["Оффер","Спрос","Активация","Первая ценность","Мост к деньгам","Оплата","Масштаб","Удержание"];
+function strip(a){ return [0,1,2,3,4,5,6,7].map(i=> i===a? `<b>[${i}]</b>`:i).join(" "); }
+function enter(){
+  KEY = document.getElementById("key").value.trim();
+  if(KEY){ sessionStorage.setItem("sozdatel_key", KEY); load(); }
+}
+async function load(){
+  const r = await fetch("/api/cabinet", {headers:{"X-Owner-Key": KEY}});
+  if(!r.ok){ sessionStorage.removeItem("sozdatel_key"); document.getElementById("gate").style.display="block"; return; }
+  const d = await r.json();
+  document.getElementById("gate").style.display = "none";
+  document.getElementById("desk").style.display = "block";
+  const g = document.getElementById("grid"); g.innerHTML = "";
+
+  d.smoke.forEach(s => {
+    const el = document.createElement("div"); el.className = "p";
+    el.innerHTML = `
+      <div class="kind">проверка спроса · Создатель</div>
+      <h2>${s.name}</h2>
+      <div class="stage">${strip(s.stage)}<span class="nm">${s.stage_name}</span></div>
+      <div class="nums">
+        <div class="n"><div class="v">${s.views}<span style="font-size:.5em;color:var(--muted)">/${s.target}</span></div><div class="l">визитов</div></div>
+        <div class="n"><div class="v">${s.leads}</div><div class="l">заявок</div></div>
+        <div class="n"><div class="v">${s.rate}%</div><div class="l">конверсия</div></div>
+      </div>
+      <div class="bar"><i style="width:${s.progress}%"></i></div>
+      <div class="verdict">${s.verdict}</div>
+      <div class="next"><span>следующий шаг</span>${s.next_step}</div>
+      <div class="acts">
+        <button class="btn" onclick="location.href='${s.project_url}'">Открыть проект</button>
+        <button class="btn ghost" onclick="window.open('${s.landing_url}','_blank')">Лендинг</button>
+        <button class="btn ghost" onclick="del('${s.idea_id}')">Удалить</button>
+      </div>`;
+    g.appendChild(el);
+  });
+
+  d.tracked.forEach(t => {
+    const el = document.createElement("div"); el.className = "p";
+    el.innerHTML = `
+      <div class="kind">внешний проект · ведётся отдельно</div>
+      <h2>${t.name}</h2>
+      <div class="stage">${strip(t.stage)}<span class="nm">${t.stage_name}</span></div>
+      <div class="next"><span>что происходит</span>${t.note || "—"}</div>
+      <div class="acts">
+        ${t.link? `<button class="btn" onclick="window.open('${t.link}','_blank')">Открыть</button>`:""}
+        <button class="btn ghost" onclick="edit(${t.id},'${(t.name||"").replace(/'/g,"")}',${t.stage})">Изменить</button>
+        <button class="btn ghost" onclick="delTracked(${t.id})">Удалить</button>
+      </div>`;
+    g.appendChild(el);
+  });
+
+  const add = document.createElement("div"); add.className = "new";
+  add.innerHTML = `<h2>+ Новая идея</h2><p>Проверить спрос за 5 дней: оффер → лендинг → вердикт.</p>
+    <div class="acts">
+      <button class="btn" onclick="location.href='/'">Проверить идею</button>
+      <button class="btn ghost" onclick="addTracked()">Добавить существующий проект</button>
+    </div>`;
+  g.appendChild(add);
+
+  // Готовые офферы — запуск в один клик (только те, что ещё не запущены)
+  const launched = new Set(d.smoke.map(s=>s.idea_id));
+  const pr = await fetch("/api/presets", {headers:{"X-Owner-Key": KEY}});
+  if(pr.ok){
+    const pd = await pr.json();
+    pd.presets.filter(o=>!launched.has(o.idea_id)).forEach(o=>{
+      const el = document.createElement("div"); el.className = "new";
+      el.innerHTML = `<div class="kind">готовый оффер · запуск в один клик</div>
+        <h2 style="color:var(--ink)">${o.product_name}</h2><p>${o.sub}</p>`;
+      const b = document.createElement("button"); b.className = "btn"; b.style.alignSelf="flex-start";
+      b.textContent = `Запустить «${o.product_name}»`;
+      b.onclick = async ()=>{
+        b.disabled = true; b.textContent = "Запускаю…";
+        const r = await fetch("/api/launch", {method:"POST",
+          headers:{"Content-Type":"application/json","X-Owner-Key":KEY},
+          body: JSON.stringify({idea_text:"preset:"+o.idea_id, offer:o})});
+        const data = await r.json();
+        if(data.ok) location.href = `/p/${data.idea_id}`;
+      };
+      el.appendChild(b); g.appendChild(el);
+    });
+  }
+
+  document.getElementById("wl").textContent = d.waitlist && d.waitlist.count
+    ? `Лист ожидания Создателя: ${d.waitlist.count} контактов`
+    : "";
+}
+async function del(id){
+  if(!confirm(`Удалить проверку «${id}» вместе с событиями?`)) return;
+  await fetch(`/api/projects/${id}`,{method:"DELETE",headers:{"X-Owner-Key":KEY}}); load();
+}
+async function delTracked(id){
+  if(!confirm("Удалить карточку проекта?")) return;
+  await fetch(`/api/tracked/${id}`,{method:"DELETE",headers:{"X-Owner-Key":KEY}}); load();
+}
+async function edit(id,name,stage){
+  const list = STAGES.map((s,i)=>`${i} ${s}`).join(" · ");
+  const st = parseInt(prompt(`«${name}» — этап:\n${list}`, stage) || stage);
+  const note = prompt("Что происходит сейчас:", "") || "";
+  const link = prompt("Ссылка (можно пусто):", "") || "";
+  await fetch(`/api/tracked/${id}`,{method:"PATCH",
+    headers:{"Content-Type":"application/json","X-Owner-Key":KEY},
+    body:JSON.stringify({name,stage:st,status_note:note,external_link:link})});
+  load();
+}
+async function addTracked(){
+  const name = prompt("Название проекта:"); if(!name) return;
+  const list = STAGES.map((s,i)=>`${i} ${s}`).join(" · ");
+  const stage = parseInt(prompt(`Этап:\n${list}`, "2") || "2");
+  const note = prompt("Что происходит сейчас:", "") || "";
+  const link = prompt("Ссылка (можно пусто):", "") || "";
+  await fetch("/api/tracked",{method:"POST",
+    headers:{"Content-Type":"application/json","X-Owner-Key":KEY},
+    body:JSON.stringify({name,stage,status_note:note,external_link:link})});
+  load();
+}
+if(KEY) load();
+</script>
+</body>
+</html>
