@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Создатель — от идеи до денег по этапам</title>
+<title>Создатель — проверка бизнес-идеи за 5 дней: спрос, лендинг, вердикт</title>
+<meta name="description" content="Опишите идею — Создатель соберёт проверочную страницу, приведёт людей из Яндекса и вынесет вердикт: есть ли спрос. Дни и ~1500 ₽ вместо полугода разработки вслепую.">
+<meta property="og:title" content="Создатель — проверьте идею до того, как строить продукт">
+<meta property="og:description" content="Идея → страница → живые люди → вердикт. От идеи до денег по этапам, которые нельзя перепрыгнуть.">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="ru_RU">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -79,7 +84,7 @@
   .warn{margin-top:12px;padding:12px 14px;border:1px solid var(--accent);
     border-radius:10px;color:var(--accent);font-size:15px;display:none}
 
-  /* Офферы */
+  /* Варианты */
   .offers{display:grid;gap:14px;margin-top:18px}
   @media(min-width:760px){.offers{grid-template-columns:repeat(3,1fr)}}
   .offer{background:var(--card);border:1px solid var(--line);border-radius:12px;
@@ -107,22 +112,24 @@
 <div class="wrap">
   <span class="stamp">Создатель · чертёж № 0.5</span> <a href="/desk" style="float:right;color:var(--accent);font:500 15px Onest">Рабочий стол →</a>
   <h1>От идеи — до денег.<br>По этапам, <em>которые нельзя перепрыгнуть.</em></h1>
-  <p class="sub">Опишите идею — Создатель заострит оффер, соберёт и захостит
-  проверочный лендинг и вынесет вердикт по живому спросу. До того, как вы
-  потратите на продукт полгода.</p>
+  <p class="sub">Опишите идею — Создатель соберёт проверочную страницу, приведёт на неё
+  людей из поиска и вынесет вердикт: нужен ли ваш продукт живым людям.
+  Несколько дней и ~1500 ₽ — вместо полугода работы вслепую.</p>
 
   <div class="path" id="path">
     <div class="stage active"><span class="num">0</span>
       <div style="grid-column:2">
-        <h3>Оффер</h3>
-        <p>Идея превращается в формулировку ценности, которую можно показать рекламой.</p>
+        <h3>Формулировка</h3>
+        <p>Идея превращается в понятное обещание пользы — то, что можно показать людям и рекламе.</p>
         <div class="studio">
           <label for="idea" class="note" style="display:block;margin:0 0 8px">
             Кому и чем помогает ваш продукт? 2–5 предложений.</label>
           <textarea id="idea" placeholder="Например: сервис, который отвечает на отзывы покупателей за селлеров маркетплейсов — в их тоне, с учётом оценки и текста отзыва."></textarea>
-          <button class="btn" id="go">Заострить идею → 3 оффера</button>
-          <p class="note">ИИ сместит акценты: другая грань боли, другая аудитория,
-          другой момент. Уже здесь идея начнёт становиться продуктом.</p>
+          <button class="btn" id="go">Разобрать идею → 3 варианта</button>
+          <p class="note">Что произойдёт: Создатель разберёт, кому это нужно и какую
+          боль решает, и вернёт три разных варианта — у каждого готовый заголовок,
+          текст страницы и слова для рекламы. Выберете один — проверочная страница
+          будет опубликована сразу, останется включить рекламу по инструкции.</p>
           <div class="warn" id="gate" style="display:none;color:var(--ink);border-color:var(--line)">
             <p style="margin-bottom:8px"><b>Создатель сейчас в закрытом режиме.</b></p>
             <p style="color:var(--muted);font-size:14px;margin-bottom:10px">Есть ключ доступа — введите его.
@@ -147,7 +154,7 @@
     </div>
     <div class="stage active"><span class="num">1</span>
       <div style="grid-column:2"><h3>Спрос</h3>
-      <p>Лендинг + Яндекс Директ. Вердикт: сигнал есть / спроса нет / другой оффер.</p></div>
+      <p>Проверочная страница + Яндекс Директ. Вердикт: сигнал есть / спроса нет / попробовать другую подачу.</p></div>
     </div>
     <div class="stage"><span class="num">2</span><div style="grid-column:2">
       <h3>Активация <span class="lock">🔒 до вердикта этапа 1</span></h3>
@@ -168,6 +175,9 @@
       <h3>Удержание <span class="lock">🔒</span></h3>
       <p>Продлевают ли второй месяц — здесь решается, бизнес ли это.</p></div></div>
   </div>
+  <footer style="margin-top:60px;padding-top:20px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)">
+    Создатель · <a href="/legal" style="color:var(--muted)">Политика персональных данных и условия</a>
+  </footer>
 </div>
 
 <script>
@@ -187,7 +197,8 @@ function applyKey(){
   OWNER_KEY = document.getElementById("keyInput").value.trim();
   if(OWNER_KEY){
     sessionStorage.setItem("sozdatel_key", OWNER_KEY);
-    location.href = "/desk";
+    document.getElementById("gate").style.display = "none";
+    go.click();  // человек шёл разбирать идею — продолжаем его действие
   }
 }
 async function joinWaitlist(){
@@ -242,19 +253,11 @@ async function loadCabinet(){
     list.innerHTML = `<p class="note">⚠ ${e.message}</p>`;
   }
 }
-async function addTracked(){
-  const name = prompt("Название проекта:"); if(!name) return;
-  const stage = parseInt(prompt("Этап 0-7 (0 Оффер · 1 Спрос · 2 Активация · 3 Первая ценность · 4 Мост · 5 Оплата · 6 Масштаб · 7 Удержание):", "0")||"0");
-  const note = prompt("Одной строкой: что происходит сейчас?", "") || "";
-  const link = prompt("Ссылка (бот/кабинет), можно пусто:", "") || "";
-  await ownerFetch("/api/tracked", {method:"POST",
-    body: JSON.stringify({name, stage, status_note: note, external_link: link})});
-  loadCabinet();
-}
 
 
-/* Владелец с ключом сразу идёт на рабочий стол — лендинг ему не нужен */
-if(sessionStorage.getItem("sozdatel_key")) location.replace("/desk");
+/* Владелец с ключом идёт на рабочий стол, НО ?new=1 (кнопка «Проверить
+   идею» со стола) оставляет его здесь — иначе петля стол→главная→стол */
+if(sessionStorage.getItem("sozdatel_key") && !location.search.includes("new")) location.replace("/desk");
   }
 }
 async function joinWaitlist(){
@@ -308,15 +311,6 @@ async function loadCabinet(){
   }catch(e){
     list.innerHTML = `<p class="note">⚠ ${e.message}</p>`;
   }
-}
-async function addTracked(){
-  const name = prompt("Название проекта:"); if(!name) return;
-  const stage = parseInt(prompt("Этап 0-7 (0 Оффер · 1 Спрос · 2 Активация · 3 Первая ценность · 4 Мост · 5 Оплата · 6 Масштаб · 7 Удержание):", "0")||"0");
-  const note = prompt("Одной строкой: что происходит сейчас?", "") || "";
-  const link = prompt("Ссылка (бот/кабинет), можно пусто:", "") || "";
-  await ownerFetch("/api/tracked", {method:"POST",
-    body: JSON.stringify({name, stage, status_note: note, external_link: link})});
-  loadCabinet();
 }
 
 
@@ -335,7 +329,7 @@ go.addEventListener("click", async () => {
   offersEl.innerHTML = ""; warnEl.style.display = "none"; launchedEl.style.display = "none";
   go.disabled = true;
   const phases = ["Изучаю боль…","Ищу, кто её уже гуглит…","Подбираю три угла атаки…",
-                  "Пишу офферы…","Собираю запросы для Директа…","Почти готово…"];
+                  "Пишу варианты…","Собираю запросы для Директа…","Почти готово…"];
   let t0 = Date.now(), ph = 0;
   const ticker = setInterval(()=>{
     const sec = Math.round((Date.now()-t0)/1000);
@@ -351,20 +345,20 @@ go.addEventListener("click", async () => {
     if (data.warning) { warnEl.textContent = "⚠ " + data.warning; warnEl.style.display = "block"; }
     if (data.sharpened_note) {
       const n = document.createElement("p"); n.className = "note";
-      n.textContent = "Что я сместил: " + data.sharpened_note;
+      n.textContent = "Как я повернул идею: " + data.sharpened_note;
       offersEl.appendChild(n); n.style.gridColumn = "1/-1";
     }
     data.offers.forEach(o => {
       const card = document.createElement("div"); card.className = "offer";
       card.innerHTML = `<span class="angle">${o.angle}</span>
         <h4>${o.h1.replace(/<\/?em>/g,"")}</h4><p>${o.sub}</p>
-        <label style="font-size:12px;color:var(--muted)">Название проекта — можно поменять:</label>`;
+        <label style="font-size:12px;color:var(--muted)">Как назовём проект? (можно своё)</label>`;
       const nameInput = document.createElement("input");
       nameInput.type = "text"; nameInput.value = o.product_name;
       nameInput.style.cssText = "width:100%;padding:9px;margin:4px 0 8px;border:1.5px solid var(--line);border-radius:8px;background:#081526;color:var(--ink);font:inherit";
       card.appendChild(nameInput);
       const b = document.createElement("button");
-      b.textContent = "Запустить этот лендинг";
+      b.textContent = "Опубликовать эту страницу";
       b.onclick = () => {
         const name = nameInput.value.trim();
         if(name) o.product_name = name;
@@ -376,7 +370,7 @@ go.addEventListener("click", async () => {
     if(!String(e.message).includes("ключ доступа")){
       warnEl.textContent = "⚠ " + e.message; warnEl.style.display = "block";
     }
-  } finally { clearInterval(ticker); go.disabled = false; go.textContent = "Заострить идею → 3 оффера"; }
+  } finally { clearInterval(ticker); go.disabled = false; go.textContent = "Разобрать идею → 3 варианта"; }
 });
 
 async function launch(offer){

@@ -238,7 +238,7 @@ class TestCabinet:
         cab = client.get("/api/cabinet", headers=OWNER).json()
         tracked = [t for t in cab["tracked"] if t["id"] == tp_id][0]
         assert tracked["stage_name"] == "Первая ценность"
-        assert cab["stages"][0] == "Оффер" and len(cab["stages"]) == 8
+        assert cab["stages"][0] == "Формулировка" and len(cab["stages"]) == 8
 
         r = client.patch(f"/api/tracked/{tp_id}", headers=OWNER, json={
             "name": "АвтоПост", "stage": 4, "status_note": "мост подтверждается"})
@@ -383,7 +383,7 @@ class TestDesk:
         home = client.get("/").text
         assert "Рабочий стол · мои проекты" not in home   # стол ушёл с главной
         assert "deskPresets" not in home                  # пресеты тоже
-        assert "path" in home and "Оффер" in home         # таймлайн остался гостю
+        assert "path" in home and "Формулировка" in home         # таймлайн остался гостю
 
     def test_cabinet_has_next_step_and_progress(self):
         client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
@@ -435,3 +435,33 @@ class TestNightPolish:
         page = client.get("/p/chart_v1").text
         assert 'id="chart"' in page
         assert "setInterval" in page and "60000" in page
+
+
+class TestMorningPass:
+    def test_no_loop_query_param(self):
+        home = client.get("/").text
+        assert 'location.search.includes("new")' in home   # петля разорвана
+        assert 'go.click();' in home                        # ключ -> продолжаем действие
+
+    def test_no_jargon_on_pages(self):
+        home = client.get("/").text
+        assert "оффер" not in home.lower()
+        assert "Разобрать идею" in home
+        desk = client.get("/desk").text
+        assert "оффер" not in desk.lower()
+
+    def test_seo_meta(self):
+        home = client.get("/").text
+        assert 'name="description"' in home
+        assert 'property="og:title"' in home
+        r = client.get("/robots.txt")
+        assert r.status_code == 200 and "Disallow: /api/" in r.text
+
+    def test_legal_page_and_consent_on_landing(self):
+        r = client.get("/legal")
+        assert r.status_code == 200
+        assert "152-ФЗ" in r.text and "отозвать согласие" in r.text
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="legal_v1")})
+        page = client.get("/l/legal_v1").text
+        assert "/legal" in page and "соглашаетесь" in page

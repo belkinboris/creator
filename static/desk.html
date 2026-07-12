@@ -100,7 +100,7 @@
 
 <script>
 let KEY = sessionStorage.getItem("sozdatel_key") || "";
-const STAGES = ["Оффер","Спрос","Активация","Первая ценность","Мост к деньгам","Оплата","Масштаб","Удержание"];
+const STAGES = ["Формулировка","Спрос","Активация","Первая ценность","Мост к деньгам","Оплата","Масштаб","Удержание"];
 function strip(a){ return [0,1,2,3,4,5,6,7].map(i=> i===a? `<b>[${i}]</b>`:i).join(" "); }
 function enter(){
   KEY = document.getElementById("key").value.trim();
@@ -152,21 +152,21 @@ async function load(){
   });
 
   const add = document.createElement("div"); add.className = "new";
-  add.innerHTML = `<h2>+ Новая идея</h2><p>Проверить спрос за 5 дней: оффер → лендинг → вердикт.</p>
+  add.innerHTML = `<h2>+ Новая идея</h2><p>Проверить спрос за 5 дней: страница → живые люди → вердикт.</p>
     <div class="acts">
-      <button class="btn" onclick="location.href='/'">Проверить идею</button>
+      <button class="btn" onclick="location.href='/?new=1'">Проверить идею</button>
       <button class="btn ghost" onclick="addTracked()">Добавить существующий проект</button>
     </div>`;
   g.appendChild(add);
 
-  // Готовые офферы — запуск в один клик (только те, что ещё не запущены)
+  // Готовые варианты — запуск в один клик (только те, что ещё не запущены)
   const launched = new Set(d.smoke.map(s=>s.idea_id));
   const pr = await fetch("/api/presets", {headers:{"X-Owner-Key": KEY}});
   if(pr.ok){
     const pd = await pr.json();
     pd.presets.filter(o=>!launched.has(o.idea_id)).forEach(o=>{
       const el = document.createElement("div"); el.className = "new";
-      el.innerHTML = `<div class="kind">готовый оффер · запуск в один клик</div>
+      el.innerHTML = `<div class="kind">готовый вариант · запуск в один клик</div>
         <h2 style="color:var(--ink)">${o.product_name}</h2><p>${o.sub}</p>`;
       const b = document.createElement("button"); b.className = "btn"; b.style.alignSelf="flex-start";
       b.textContent = `Запустить «${o.product_name}»`;

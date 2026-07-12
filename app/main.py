@@ -78,7 +78,7 @@ class SmokeProject(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
-STAGE_NAMES = ["Оффер", "Спрос", "Активация", "Первая ценность",
+STAGE_NAMES = ["Формулировка", "Спрос", "Активация", "Первая ценность",
                "Мост к деньгам", "Оплата", "Масштаб", "Удержание"]
 
 
@@ -108,7 +108,7 @@ class SmokeEvent(SQLModel, table=True):
 
 SQLModel.metadata.create_all(engine)
 
-app = FastAPI(title="Создатель", version="1.0")
+app = FastAPI(title="Создатель", version="1.0.1")
 
 # Ключ владельца: закрывает генерацию офферов, запуск и удаление лендингов.
 # Публичными остаются только /l/{id}, /api/smoke-event, /health -- им и
@@ -452,7 +452,7 @@ def delete_tracked(tp_id: int, request: Request):
 @app.get("/api/cabinet")
 def cabinet(request: Request):
     """Портфель целиком: внешние проекты + smoke-тесты Создателя.
-    Smoke-этап определяется данными: есть клики -> ① Спрос, иначе ⓪ Оффер."""
+    Smoke-этап определяется данными: есть клики -> ① Спрос, иначе ⓪ Формулировка."""
     _check_owner(request)
     out = {"stages": STAGE_NAMES, "tracked": [], "smoke": []}
     with Session(engine) as s:
@@ -596,6 +596,22 @@ def _warm_up() -> None:
             _static(name)
         except Exception:
             logger.exception("warm-up static %s failed", name)
+
+
+@app.get("/legal", response_class=HTMLResponse)
+def legal_page():
+    return HTMLResponse(_static("legal.html"))
+
+
+@app.get("/robots.txt")
+def robots():
+    from fastapi.responses import PlainTextResponse
+    # Индексируем витрину; служебные и проверочные страницы -- нет
+    # (лендинги идей — временные, дубли по структуре: индексация вредит)
+    return PlainTextResponse(
+        "User-agent: *\nAllow: /$\nDisallow: /desk\nDisallow: /p/\n"
+        "Disallow: /l/\nDisallow: /api/\nDisallow: /legal\n"
+    )
 
 
 @app.get("/favicon.ico")
