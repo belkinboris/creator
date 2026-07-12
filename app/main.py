@@ -108,7 +108,7 @@ class SmokeEvent(SQLModel, table=True):
 
 SQLModel.metadata.create_all(engine)
 
-app = FastAPI(title="Создатель", version="0.9.4")
+app = FastAPI(title="Создатель", version="1.0")
 
 # Ключ владельца: закрывает генерацию офферов, запуск и удаление лендингов.
 # Публичными остаются только /l/{id}, /api/smoke-event, /health -- им и
@@ -314,6 +314,33 @@ def verdict(idea_id: str, request: Request):
             "direct_utm": (f"?utm_source=yandex_direct&utm_campaign={idea_id}"
                            "&utm_content={ad_id}&utm_term={keyword}"),
             "contacts": [c for c, _ in leads_rows]}
+
+
+@app.get("/api/series/{idea_id}")
+def series(idea_id: str, request: Request):
+    """Визиты/заявки по дням за последние 14 дней — для графика на /p/{id}."""
+    _check_owner(request)
+    from collections import defaultdict
+    from datetime import timedelta
+    with Session(engine) as s:
+        if s.exec(select(SmokeProject.id).where(SmokeProject.idea_id == idea_id)).first() is None:
+            raise HTTPException(404, "идея не найдена")
+        since = utcnow() - timedelta(days=14)
+        rows = s.exec(select(SmokeEvent.created_at, SmokeEvent.event).where(
+            SmokeEvent.idea == idea_id, SmokeEvent.created_at >= since)).all()
+    days: dict[str, dict] = defaultdict(lambda: {"views": 0, "leads": 0})
+    for created_at, event in rows:
+        key = created_at.strftime("%d.%m")
+        if event == "page_view":
+            days[key]["views"] += 1
+        elif event == "lead_submitted":
+            days[key]["leads"] += 1
+    # Полный ряд из 14 дней, включая нули — график не должен «рваться»
+    out = []
+    for i in range(13, -1, -1):
+        d = (utcnow() - timedelta(days=i)).strftime("%d.%m")
+        out.append({"date": d, **days.get(d, {"views": 0, "leads": 0})})
+    return {"ok": True, "days": out}
 
 
 @app.get("/api/projects")
@@ -581,9 +608,23 @@ def favicon():
 
 @app.get("/health")
 def health():
-    # Версия берётся из app -- НЕ хардкодить: захардкоженная "0.1" один раз
-    # уже отправила владельца в часовую погоню за несуществующей проблемой.
+    """Проверка живости ПРОЦЕССА. Намеренно НЕ трогает БД: если Postgres
+    тормозит или недоступен, /health должен ответить мгновенно -- иначе
+    это уже не health-check, а часть проблемы, которую он должен обнаружить."""
     return {"ok": True, "service": "sozdatel", "version": app.version}
+
+
+@app.get("/health/db")
+def health_db():
+    """Отдельная проверка БД -- дольше и по требованию, не в общем пути."""
+    import time
+    t0 = time.monotonic()
+    try:
+        with Session(engine) as s:
+            s.exec(select(SmokeProject.id).limit(1)).first()
+        return {"ok": True, "db_ms": round((time.monotonic() - t0) * 1000)}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
 
 
 _STATIC_CACHE: dict[str, str] = {}
@@ -603,10 +644,11 @@ def desk_page():
     return HTMLResponse(_static("desk.html"))
 
 
-@app.get("/portfolio", response_class=HTMLResponse)
+@app.get("/portfolio")
 def portfolio_page():
-    # Страница статическая: никаких обращений к БД. Данные подтянет /api/cabinet.
-    return HTMLResponse(_static("portfolio.html"))
+    """Экран умер в v1.0: дублировал /desk и путал. Старые ссылки не ломаем."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/desk", status_code=307)
 
 
 @app.get("/p/{idea_id}", response_class=HTMLResponse)

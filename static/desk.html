@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Рабочий стол — Создатель</title>
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{--blueprint:#11263F;--line:rgba(214,228,244,.16);--ink:#EAF2FB;
     --muted:#8FA6BF;--accent:#FF8A2A;--ok:#4CC38A;--card:#0C1D31}
@@ -16,7 +16,7 @@
   .wrap{max-width:980px;margin:0 auto;padding:36px 20px 80px}
   a{color:var(--accent);text-decoration:none}
   .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:6px}
-  h1{font:700 clamp(26px,5vw,36px)/1.1 "Unbounded",sans-serif}
+  h1{font:700 clamp(26px,5vw,36px)/1.1 "Manrope",sans-serif}
   .sub{color:var(--muted);font-size:15px;margin-bottom:28px}
 
   /* Одна сетка — все проекты одинаковыми карточками */
@@ -26,14 +26,14 @@
     padding:18px;display:flex;flex-direction:column;gap:10px;position:relative}
   .p .kind{font:400 11px "JetBrains Mono",monospace;letter-spacing:.1em;
     text-transform:uppercase;color:var(--muted)}
-  .p h2{font:700 21px "Unbounded",sans-serif}
+  .p h2{font:700 21px "Manrope",sans-serif}
   .stage{font:700 12px "JetBrains Mono",monospace;letter-spacing:3px;color:var(--muted)}
   .stage b{color:var(--accent)}
   .stage .nm{letter-spacing:0;font-family:"Onest";font-weight:600;color:var(--ink);margin-left:8px}
 
   /* Цифры — главное на карточке */
   .nums{display:flex;gap:22px;margin-top:2px}
-  .n .v{font:700 30px/1 "Unbounded",sans-serif}
+  .n .v{font:700 30px/1 "Manrope",sans-serif}
   .n .l{font:400 11px "JetBrains Mono",monospace;text-transform:uppercase;
     letter-spacing:.08em;color:var(--muted);margin-top:4px}
   .bar{height:6px;background:#081526;border-radius:99px;overflow:hidden}
@@ -52,7 +52,7 @@
 
   .new{border:1.5px dashed var(--line);border-radius:14px;padding:18px;
     display:flex;flex-direction:column;justify-content:center;gap:8px;min-height:150px}
-  .new h2{font:700 19px "Unbounded",sans-serif;color:var(--muted)}
+  .new h2{font:700 19px "Manrope",sans-serif;color:var(--muted)}
   .new p{font-size:14px;color:var(--muted)}
   .wl{margin-top:22px;font-size:14px;color:var(--muted)}
   #gate{max-width:420px;margin:60px auto;background:var(--card);border:1px solid var(--line);
@@ -64,7 +64,7 @@
 <body>
 <div class="wrap">
   <div id="gate">
-    <h2 style="font:700 20px Unbounded;margin-bottom:6px">Рабочий стол</h2>
+    <h2 style="font:800 20px Manrope;margin-bottom:6px">Рабочий стол</h2>
     <p style="color:var(--muted);font-size:14px">Введите ключ владельца.</p>
     <input type="password" id="key" placeholder="Ключ доступа">
     <button class="btn" onclick="enter()">Войти</button>
@@ -77,6 +77,23 @@
     </div>
     <p class="sub">Каждый проект — где он, что показывают цифры и что делать дальше.</p>
     <div class="grid" id="grid"></div>
+
+    <div id="form" style="display:none;margin-top:14px;background:var(--card);
+      border:1px solid var(--accent);border-radius:14px;padding:18px;max-width:520px">
+      <h3 id="formTitle" style="font:800 17px Manrope;margin-bottom:12px">Проект</h3>
+      <input id="fName" placeholder="Название" style="width:100%;padding:11px;margin-bottom:8px;
+        border:1.5px solid var(--line);border-radius:9px;background:#081526;color:var(--ink);font:inherit">
+      <select id="fStage" style="width:100%;padding:11px;margin-bottom:8px;border:1.5px solid var(--line);
+        border-radius:9px;background:#081526;color:var(--ink);font:inherit"></select>
+      <input id="fNote" placeholder="Что происходит сейчас (одной строкой)" style="width:100%;padding:11px;
+        margin-bottom:8px;border:1.5px solid var(--line);border-radius:9px;background:#081526;color:var(--ink);font:inherit">
+      <input id="fLink" placeholder="Ссылка на проект (можно пусто)" style="width:100%;padding:11px;
+        margin-bottom:12px;border:1.5px solid var(--line);border-radius:9px;background:#081526;color:var(--ink);font:inherit">
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="fSave">Сохранить</button>
+        <button class="btn ghost" onclick="closeForm()">Отмена</button>
+      </div>
+    </div>
     <p class="wl" id="wl"></p>
   </div>
 </div>
@@ -128,7 +145,7 @@ async function load(){
       <div class="next"><span>что происходит</span>${t.note || "—"}</div>
       <div class="acts">
         ${t.link? `<button class="btn" onclick="window.open('${t.link}','_blank')">Открыть</button>`:""}
-        <button class="btn ghost" onclick="edit(${t.id},'${(t.name||"").replace(/'/g,"")}',${t.stage})">Изменить</button>
+        <button class="btn ghost" onclick='edit(${t.id},${JSON.stringify(t.name||"")},${t.stage},${JSON.stringify(t.note||"")},${JSON.stringify(t.link||"")})'>Изменить</button>
         <button class="btn ghost" onclick="delTracked(${t.id})">Удалить</button>
       </div>`;
     g.appendChild(el);
@@ -177,26 +194,38 @@ async function delTracked(id){
   if(!confirm("Удалить карточку проекта?")) return;
   await fetch(`/api/tracked/${id}`,{method:"DELETE",headers:{"X-Owner-Key":KEY}}); load();
 }
-async function edit(id,name,stage){
-  const list = STAGES.map((s,i)=>`${i} ${s}`).join(" · ");
-  const st = parseInt(prompt(`«${name}» — этап:\n${list}`, stage) || stage);
-  const note = prompt("Что происходит сейчас:", "") || "";
-  const link = prompt("Ссылка (можно пусто):", "") || "";
-  await fetch(`/api/tracked/${id}`,{method:"PATCH",
-    headers:{"Content-Type":"application/json","X-Owner-Key":KEY},
-    body:JSON.stringify({name,stage:st,status_note:note,external_link:link})});
-  load();
+let FORM_ID = null;
+function openForm(title, data){
+  FORM_ID = data.id || null;
+  document.getElementById("formTitle").textContent = title;
+  const sel = document.getElementById("fStage");
+  sel.innerHTML = STAGES.map((s,i)=>`<option value="${i}">${i} · ${s}</option>`).join("");
+  sel.value = data.stage ?? 2;
+  document.getElementById("fName").value = data.name || "";
+  document.getElementById("fNote").value = data.note || "";
+  document.getElementById("fLink").value = data.link || "";
+  const f = document.getElementById("form");
+  f.style.display = "block"; f.scrollIntoView({behavior:"smooth", block:"center"});
+}
+function closeForm(){ document.getElementById("form").style.display = "none"; FORM_ID = null; }
+document.getElementById("fSave").onclick = async ()=>{
+  const body = JSON.stringify({
+    name: document.getElementById("fName").value.trim(),
+    stage: parseInt(document.getElementById("fStage").value),
+    status_note: document.getElementById("fNote").value.trim(),
+    external_link: document.getElementById("fLink").value.trim(),
+  });
+  const opts = {headers:{"Content-Type":"application/json","X-Owner-Key":KEY}, body};
+  if(FORM_ID) await fetch(`/api/tracked/${FORM_ID}`, {method:"PATCH", ...opts});
+  else await fetch("/api/tracked", {method:"POST", ...opts});
+  closeForm(); load();
+};
+
+async function edit(id,name,stage,note,link){
+  openForm("Изменить проект", {id, name, stage, note, link});
 }
 async function addTracked(){
-  const name = prompt("Название проекта:"); if(!name) return;
-  const list = STAGES.map((s,i)=>`${i} ${s}`).join(" · ");
-  const stage = parseInt(prompt(`Этап:\n${list}`, "2") || "2");
-  const note = prompt("Что происходит сейчас:", "") || "";
-  const link = prompt("Ссылка (можно пусто):", "") || "";
-  await fetch("/api/tracked",{method:"POST",
-    headers:{"Content-Type":"application/json","X-Owner-Key":KEY},
-    body:JSON.stringify({name,stage,status_note:note,external_link:link})});
-  load();
+  openForm("Добавить существующий проект", {stage: 2});
 }
 if(KEY) load();
 </script>

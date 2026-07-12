@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{PRODUCT_NAME}} — Создатель</title>
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root{--blueprint:#11263F;--line:rgba(214,228,244,.16);--ink:#EAF2FB;
     --muted:#8FA6BF;--accent:#FF8A2A;--ok:#4CC38A;--card:#0C1D31}
@@ -18,7 +18,7 @@
   .crumbs{font:400 13px "JetBrains Mono",monospace;color:var(--muted);margin-bottom:22px}
   .strip{font:700 14px "JetBrains Mono",monospace;letter-spacing:4px;color:var(--muted);margin:6px 0 4px}
   .strip b{color:var(--accent)}
-  h1{font:700 clamp(26px,5.4vw,38px)/1.15 "Unbounded",sans-serif;margin:6px 0 4px}
+  h1{font:700 clamp(26px,5.4vw,38px)/1.15 "Manrope",sans-serif;margin:6px 0 4px}
   .stagename{color:var(--muted);margin-bottom:26px}
 
   /* ЦЕЛЬ — большими цифрами, единственный фокус экрана */
@@ -26,7 +26,7 @@
     padding:22px;margin-bottom:14px}
   .goal .label{font:400 12px "JetBrains Mono",monospace;letter-spacing:.12em;
     text-transform:uppercase;color:var(--muted)}
-  .big{font:700 clamp(44px,10vw,72px)/1.05 "Unbounded",sans-serif;margin:8px 0 2px}
+  .big{font:700 clamp(44px,10vw,72px)/1.05 "Manrope",sans-serif;margin:8px 0 2px}
   .big small{font-size:.45em;color:var(--muted);font-weight:500}
   .goal .next{margin-top:10px;color:var(--muted)}
   .verdict{display:inline-block;margin-top:12px;padding:7px 12px;border-radius:99px;
@@ -36,7 +36,7 @@
   .mini{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
   .mini .label{font:400 11px "JetBrains Mono",monospace;letter-spacing:.1em;
     text-transform:uppercase;color:var(--muted)}
-  .mini .val{font:700 26px "Unbounded",sans-serif;margin-top:6px}
+  .mini .val{font:700 26px "Manrope",sans-serif;margin-top:6px}
 
   /* Инструкция этапа — подробная, шаг за шагом */
   .howto{background:var(--card);border:1px solid var(--line);border-radius:14px;
@@ -80,6 +80,16 @@
   <div class="row">
     <div class="mini"><div class="label">Заявки</div><div class="val" id="leads">—</div></div>
     <div class="mini"><div class="label">Конверсия в заявку</div><div class="val" id="rate">—</div></div>
+  </div>
+
+  <div class="goal" style="margin-top:14px">
+    <div class="label">Динамика · 14 дней</div>
+    <canvas id="chart" height="120" style="width:100%;margin-top:10px"></canvas>
+    <div style="display:flex;gap:16px;margin-top:8px;font:400 11px 'JetBrains Mono',monospace;color:var(--muted)">
+      <span><i style="display:inline-block;width:10px;height:10px;background:var(--accent);border-radius:2px"></i> визиты</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:var(--ok);border-radius:2px"></i> заявки</span>
+      <span style="margin-left:auto" id="updated"></span>
+    </div>
   </div>
 
   <div class="howto" id="howto">
@@ -170,6 +180,42 @@ async function rename(){
   else alert("Не получилось переименовать.");
 }
 load();
+
+/* График по дням: чистый canvas, без библиотек */
+async function drawChart(){
+  try{
+    const r = await fetch(`/api/series/${IDEA_ID}?key=${encodeURIComponent(OWNER_KEY)}`);
+    if(!r.ok) return;
+    const {days} = await r.json();
+    const c = document.getElementById("chart");
+    const dpr = window.devicePixelRatio || 1;
+    const W = c.clientWidth, H = 120;
+    c.width = W * dpr; c.height = H * dpr;
+    const x = c.getContext("2d"); x.scale(dpr, dpr);
+    const maxV = Math.max(1, ...days.map(d => d.views));
+    const bw = W / days.length;
+    days.forEach((d, i) => {
+      const vh = Math.round(d.views / maxV * (H - 24));
+      const lh = Math.round(d.leads / maxV * (H - 24));
+      x.fillStyle = "#FF8A2A";
+      x.fillRect(i * bw + 2, H - 14 - vh, Math.max(2, bw - 8), vh);
+      if (d.leads) {
+        x.fillStyle = "#4CC38A";
+        x.fillRect(i * bw + 2 + Math.max(2, bw - 8) / 2, H - 14 - lh, Math.max(2, (bw - 8) / 2), lh);
+      }
+      if (i % 2 === 0) {
+        x.fillStyle = "#8FA6BF"; x.font = "9px JetBrains Mono";
+        x.fillText(d.date, i * bw + 2, H - 3);
+      }
+    });
+    document.getElementById("updated").textContent =
+      "обновлено " + new Date().toLocaleTimeString("ru", {hour:"2-digit", minute:"2-digit"});
+  }catch(e){ /* графика нет — цифры остаются */ }
+}
+drawChart();
+
+/* Автообновление: цифры и график сами раз в 60 сек — не надо жать F5 */
+setInterval(()=>{ load(); drawChart(); }, 60000);
 </script>
 </body>
 </html>

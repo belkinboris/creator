@@ -285,8 +285,8 @@ class TestProjectPages:
         assert client.get("/p/nope").status_code == 404
 
     def test_portfolio_page_and_clean_index(self):
-        r = client.get("/portfolio")
-        assert r.status_code == 200 and "Портфель" in r.text
+        r = client.get("/portfolio")   # редирект доводит до рабочего стола
+        assert r.status_code == 200 and "Рабочий стол" in r.text
         home = client.get("/").text
         assert "Мои проекты" not in home            # кабинет ушёл с главной
         assert "/desk" in home                      # владельцу — на рабочий стол
@@ -398,3 +398,40 @@ class TestDesk:
         s = [x for x in cab["smoke"] if x["idea_id"] == "desk_fresh_v1"][0]
         assert "Копим клики" in s["next_step"]
         assert s["progress"] in (12, 13)  # 5/40 = 12.5%, банковское округление
+
+
+class TestNightPolish:
+    def test_portfolio_redirects_to_desk(self):
+        r = client.get("/portfolio", follow_redirects=False)
+        assert r.status_code == 307
+        assert r.headers["location"] == "/desk"
+
+    def test_series_endpoint(self):
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="ser_v1")})
+        for _ in range(3):
+            client.post("/api/smoke-event", json={"event": "page_view", "idea": "ser_v1"})
+        client.post("/api/smoke-event", json={"event": "lead_submitted", "idea": "ser_v1", "contact": "a@b.ru"})
+        r = client.get("/api/series/ser_v1", headers=OWNER).json()
+        assert len(r["days"]) == 14
+        today = r["days"][-1]
+        assert today["views"] == 3 and today["leads"] == 1
+        assert r["days"][0]["views"] == 0  # полный ряд с нулями
+
+    def test_series_requires_key_and_404(self):
+        assert client.get("/api/series/ser_v1").status_code == 401
+        assert client.get("/api/series/nope", headers=OWNER).status_code == 404
+
+    def test_no_prompts_on_desk_and_manrope_everywhere(self):
+        desk = client.get("/desk").text
+        assert "prompt(" not in desk.replace("password", "")  # форма вместо диалогов
+        for page in ("/", "/desk"):
+            html = client.get(page).text
+            assert "Manrope" in html and "Unbounded" not in html
+
+    def test_project_page_has_chart_and_autorefresh(self):
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="chart_v1")})
+        page = client.get("/p/chart_v1").text
+        assert 'id="chart"' in page
+        assert "setInterval" in page and "60000" in page
