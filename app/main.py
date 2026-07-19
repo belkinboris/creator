@@ -13,7 +13,9 @@
 Отдельный репозиторий и деплой (Railway), с Аналитиком Воронки не
 смешивается — интеграция позже через его connector (см. SPEC_SMOKE_MODE).
 
-env: ANTHROPIC_API_KEY (обязателен), DATABASE_URL (по умолчанию sqlite).
+env: LLM_PROVIDER=yandex|anthropic (по умолчанию yandex; в режиме yandex
+обязательны YANDEX_API_KEY и YANDEX_FOLDER_ID, в anthropic --
+ANTHROPIC_API_KEY), DATABASE_URL (по умолчанию sqlite).
 """
 
 from __future__ import annotations

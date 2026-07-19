@@ -2,10 +2,16 @@
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["DATABASE_URL"] = "sqlite://"
+# llm_adapter читает YANDEX_* на уровне модуля — задаём тестовые значения
+# до импорта, иначе payload-сборка для yandex падает на "не задан FOLDER_ID"
+# даже когда сеть не используется (_post инъекция).
+os.environ.setdefault("YANDEX_FOLDER_ID", "test-folder")
+os.environ.setdefault("YANDEX_API_KEY", "test-yandex-key")
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import llm_adapter
 from app.offer_engine import OfferEngineError, sharpen_idea, _validate
 from app.main import app, compute_verdict, render_landing
 
@@ -34,6 +40,17 @@ VALID_OFFER = {
 }
 
 
+def _yandex_response(text: str, *, with_reasoning: bool = False) -> dict:
+    """Собирает ответ в форме Yandex Responses API (см. llm_adapter._extract_yandex_text).
+    with_reasoning=True добавляет блок скрытого thinking перед message-блоком,
+    чтобы проверить, что он отфильтровывается, а не попадает в текст."""
+    output = []
+    if with_reasoning:
+        output.append({"type": "reasoning", "content": [{"type": "text", "text": "секретные мысли модели"}]})
+    output.append({"type": "message", "content": [{"type": "output_text", "text": text}]})
+    return {"output": output}
+
+
 class TestOfferEngine:
     def test_short_idea_rejected(self):
         with pytest.raises(OfferEngineError):
@@ -41,26 +58,58 @@ class TestOfferEngine:
 
     def test_happy_path_with_injected_llm(self):
         payload_capture = {}
-        async def fake_post(payload):
+        async def fake_post(provider, payload):
+            assert provider == "yandex"
             payload_capture.update(payload)
             body = {"sharpened_note": "сместил", "warning": "",
                     "offers": [dict(VALID_OFFER, idea_id=f"i{i}") for i in range(3)]}
-            return {"content": [{"type": "text", "text": json.dumps(body, ensure_ascii=False)}]}
+            return _yandex_response(json.dumps(body, ensure_ascii=False))
         out = asyncio.run(sharpen_idea("Сервис отвечает на отзывы за селлеров маркетплейсов", _post=fake_post))
         assert len(out["offers"]) == 3
-        assert "Идея фаундера" in payload_capture["messages"][0]["content"]
-        assert "РАЗНЫХ оффера" in payload_capture["system"]
+        assert "Идея фаундера" in payload_capture["input"]
+        assert "РАЗНЫХ оффера" in payload_capture["instructions"]
+        # DeepSeek/не-Claude жёстко просим не класть markdown внутрь JSON-полей
+        assert "markdown" in payload_capture["instructions"]
+
+    def test_thinking_budget_added_to_max_tokens(self):
+        """DeepSeek thinking всегда включён -- max_output_tokens должен быть
+        поднят сверх запрошенного, иначе ответ обрежется на reasoning."""
+        payload_capture = {}
+        async def fake_post(provider, payload):
+            payload_capture.update(payload)
+            body = {"offers": [dict(VALID_OFFER, idea_id=f"i{i}") for i in range(3)]}
+            return _yandex_response(json.dumps(body, ensure_ascii=False))
+        asyncio.run(sharpen_idea("Идея достаточно длинная для проверки бюджета", _post=fake_post))
+        assert payload_capture["max_output_tokens"] == 8000 + llm_adapter.YANDEX_THINKING_BUDGET
+
+    def test_reasoning_block_filtered_out(self):
+        async def fake_post(provider, payload):
+            body = {"offers": [dict(VALID_OFFER, idea_id=f"i{i}") for i in range(3)]}
+            return _yandex_response(json.dumps(body, ensure_ascii=False), with_reasoning=True)
+        out = asyncio.run(sharpen_idea("Идея достаточно длинная для проверки reasoning", _post=fake_post))
+        assert len(out["offers"]) == 3  # если бы reasoning не отфильтровался, JSON не распарсился бы
 
     def test_validate_rejects_two_offers(self):
         with pytest.raises(OfferEngineError):
             _validate({"offers": [VALID_OFFER, VALID_OFFER]})
 
     def test_markdown_fences_stripped(self):
-        async def fenced(payload):
+        async def fenced(provider, payload):
             body = {"offers": [dict(VALID_OFFER, idea_id=f"i{i}") for i in range(3)]}
-            return {"content": [{"type": "text", "text": "```json\n" + json.dumps(body) + "\n```"}]}
+            return _yandex_response("```json\n" + json.dumps(body) + "\n```")
         out = asyncio.run(sharpen_idea("Идея достаточно длинная для проверки", _post=fenced))
         assert out["offers"][0]["idea_id"] == "i0"
+
+    def test_anthropic_fallback_path_still_works(self, monkeypatch):
+        """LLM_PROVIDER=anthropic -- путь отката, переключается без деплоя кода."""
+        monkeypatch.setattr(llm_adapter, "LLM_PROVIDER", "anthropic")
+        async def fake_post(provider, payload):
+            assert provider == "anthropic"
+            assert payload["messages"][0]["content"].startswith("Идея фаундера")
+            body = {"offers": [dict(VALID_OFFER, idea_id=f"a{i}") for i in range(3)]}
+            return {"content": [{"type": "text", "text": json.dumps(body, ensure_ascii=False)}]}
+        out = asyncio.run(sharpen_idea("Идея достаточно длинная для проверки отката", _post=fake_post))
+        assert out["offers"][0]["idea_id"] == "a0"
 
 
 class TestLandingAndLaunch:
@@ -123,21 +172,21 @@ class TestTruncationRetry:
     def test_truncated_json_retried_once_then_ok(self):
         import asyncio, json as _json
         calls = {"n": 0}
-        async def flaky(payload):
+        async def flaky(provider, payload):
             calls["n"] += 1
-            assert payload["max_tokens"] >= 8000, "лимит должен быть поднят"
+            assert payload["max_output_tokens"] >= 8000, "лимит должен быть поднят"
             if calls["n"] == 1:
-                return {"content": [{"type": "text", "text": '{"offers": [{"angle": "обрыв'}]}
+                return _yandex_response('{"offers": [{"angle": "обрыв')
             body = {"offers": [dict(VALID_OFFER, idea_id=f"r{i}") for i in range(3)]}
-            return {"content": [{"type": "text", "text": _json.dumps(body, ensure_ascii=False)}]}
+            return _yandex_response(_json.dumps(body, ensure_ascii=False))
         out = asyncio.run(sharpen_idea("Достаточно длинная идея для проверки повтора", _post=flaky))
         assert calls["n"] == 2
         assert len(out["offers"]) == 3
 
     def test_double_truncation_gives_human_error(self):
         import asyncio
-        async def always_broken(payload):
-            return {"content": [{"type": "text", "text": '{"offers": [{"angle": "обр'}]}
+        async def always_broken(provider, payload):
+            return _yandex_response('{"offers": [{"angle": "обр')
         with pytest.raises(OfferEngineError) as e:
             asyncio.run(sharpen_idea("Достаточно длинная идея для проверки", _post=always_broken))
         assert "Попробуйте ещё раз" in str(e.value)
@@ -181,18 +230,18 @@ class TestTimeoutRetry:
     def test_timeout_retried_then_ok(self):
         import asyncio, json as _json, httpx as _httpx
         calls = {"n": 0}
-        async def slow_then_ok(payload):
+        async def slow_then_ok(provider, payload):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise _httpx.ReadTimeout("slow")
             body = {"offers": [dict(VALID_OFFER, idea_id=f"t{i}") for i in range(3)]}
-            return {"content": [{"type": "text", "text": _json.dumps(body, ensure_ascii=False)}]}
+            return _yandex_response(_json.dumps(body, ensure_ascii=False))
         out = asyncio.run(sharpen_idea("Достаточно длинная идея для проверки таймаута", _post=slow_then_ok))
         assert calls["n"] == 2 and len(out["offers"]) == 3
 
     def test_double_timeout_human_error(self):
         import asyncio, httpx as _httpx
-        async def always_slow(payload):
+        async def always_slow(provider, payload):
             raise _httpx.ReadTimeout("slow")
         with pytest.raises(OfferEngineError) as e:
             asyncio.run(sharpen_idea("Достаточно длинная идея для проверки", _post=always_slow))

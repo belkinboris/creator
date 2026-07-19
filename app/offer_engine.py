@@ -17,15 +17,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 
 import httpx
 
+from app import llm_adapter
+
 logger = logging.getLogger(__name__)
 
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-MODEL = os.environ.get("SOZDATEL_MODEL", "claude-sonnet-4-6")
 MAX_IDEA_CHARS = 2000
+MAX_OFFER_TOKENS = 8000
 
 SYSTEM = """Ты — продуктовый стратег Создателя, сервиса проверки стартап-идей.
 Фаундер приносит сырую идею. Твоя работа — заострить её в 3 РАЗНЫХ оффера
@@ -115,60 +115,40 @@ def _validate(data: dict) -> dict:
     return data
 
 
-async def sharpen_idea(idea: str, api_key: str | None = None, *, _post=None, _attempt: int = 1) -> dict:
+async def sharpen_idea(idea: str, *, _post=None, _attempt: int = 1) -> dict:
     """
     Идея → {"sharpened_note", "warning", "offers":[3]}. Бросает
     OfferEngineError с человеческим текстом при любой проблеме.
-    _post — инъекция для тестов.
+    _post(provider, payload) -> raw_response_dict — инъекция для тестов,
+    прокидывается в llm_adapter.call без изменений.
     """
     idea = (idea or "").strip()[:MAX_IDEA_CHARS]
     if len(idea) < 20:
         raise OfferEngineError("Опишите идею хотя бы парой предложений: кому и чем она помогает.")
 
-    api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key and _post is None:
-        raise OfferEngineError("Сервер не настроен: не задан ANTHROPIC_API_KEY.")
-
-    payload = {
-        "model": MODEL,
+    try:
         # 3 полных оффера на русском -- это 4-6k токенов (кириллица дорогая),
         # 3000 обрезало ответ посреди JSON (баг первого прод-запуска 2026-07-09).
-        "max_tokens": 8000,
-        "system": SYSTEM,
-        "messages": [{"role": "user", "content": f"Идея фаундера:\n{idea}"}],
-    }
-    try:
-        if _post is not None:
-            data = await _post(payload)
-        else:
-            # 8000 токенов ответа могут генерироваться дольше минуты --
-            # 60s таймаут ловил ReadTimeout на длинных идеях (прод-баг 2026-07-09).
-            timeout = httpx.Timeout(180.0, connect=10.0)
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(
-                    ANTHROPIC_URL, json=payload,
-                    headers={"x-api-key": api_key,
-                             "anthropic-version": "2023-06-01",
-                             "content-type": "application/json"},
-                )
-                if resp.status_code != 200:
-                    logger.warning("offer engine HTTP %s: %s", resp.status_code, resp.text[:200])
-                    raise OfferEngineError("Не получилось обратиться к ИИ. Попробуйте ещё раз через минуту.")
-                data = resp.json()
-        text = "\n".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+        # 8000 токенов ответа могут генерироваться дольше минуты -- таймаут
+        # транспорта внутри llm_adapter учитывает это (180s).
+        text = await llm_adapter.call(
+            SYSTEM, f"Идея фаундера:\n{idea}", MAX_OFFER_TOKENS, _post=_post,
+        )
         text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         return _validate(json.loads(text))
     except OfferEngineError:
         raise
+    except llm_adapter.LLMAdapterError as exc:
+        raise OfferEngineError(str(exc))
     except json.JSONDecodeError:
         logger.exception("offer engine: bad JSON (attempt %s)", _attempt)
         if _attempt == 1:
-            return await sharpen_idea(idea, api_key, _post=_post, _attempt=2)
+            return await sharpen_idea(idea, _post=_post, _attempt=2)
         raise OfferEngineError("ИИ ответил в неожиданном формате. Попробуйте ещё раз.")
     except httpx.TimeoutException:
         logger.warning("offer engine: timeout (attempt %s)", _attempt)
         if _attempt == 1:
-            return await sharpen_idea(idea, api_key, _post=_post, _attempt=2)
+            return await sharpen_idea(idea, _post=_post, _attempt=2)
         raise OfferEngineError("ИИ думал слишком долго. Подождите минуту и попробуйте ещё раз.")
     except Exception:
         logger.exception("offer engine failed")
