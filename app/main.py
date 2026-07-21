@@ -52,6 +52,7 @@ else:
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 from app.offer_engine import OfferEngineError, sharpen_idea  # noqa: E402
+from app.demand import DemandError, check_demand, generate_idea  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sozdatel")
@@ -94,6 +95,14 @@ class TrackedProject(SQLModel, table=True):
     status_note: str = ""          # одна строка: что происходит сейчас
     external_link: str = ""        # куда идти за деталями (бот, кабинет)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class DemandCheck(SQLModel, table=True):
+    """Каждая бесплатная проверка спроса -- для живого счётчика на главной."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    idea: str = ""
+    best_count: Optional[int] = None
 
 
 class SmokeEvent(SQLModel, table=True):
@@ -144,6 +153,52 @@ async def offers(data: IdeaIn, request: Request):
         return {"ok": True, **result}
     except OfferEngineError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+# ---------------------------------------------------------------------------
+# Этап ①: бесплатная проверка спроса (публичная — это вход воронки)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/idea")
+async def idea_suggest(request: Request):
+    """«Придумать за меня» — для тех, кто пришёл без идеи (вход воронки)."""
+    client_ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else "?")
+    if _rate_limited(client_ip):
+        raise HTTPException(429, "слишком часто")
+    try:
+        return {"ok": True, "idea": await generate_idea()}
+    except DemandError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.post("/api/demand")
+async def demand_check(data: IdeaIn, request: Request):
+    client_ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else "?")
+    if _rate_limited(client_ip):
+        raise HTTPException(429, "слишком часто")
+    try:
+        result = await check_demand(data.idea)
+    except DemandError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    try:  # счётчик не должен уметь ломать ответ пользователю
+        known = [f["count"] for f in result["formulations"] if f["count"] is not None]
+        with Session(engine) as s:
+            s.add(DemandCheck(idea=data.idea[:300], best_count=max(known) if known else None))
+            s.commit()
+    except Exception:
+        logging.getLogger(__name__).warning("demand check not persisted", exc_info=True)
+    return {"ok": True, **result}
+
+
+@app.get("/api/stats")
+def public_stats():
+    """Живые цифры для главной. Только честные счётчики из БД."""
+    with Session(engine) as s:
+        ideas = len(s.exec(select(DemandCheck)).all())
+        events = len(s.exec(select(SmokeEvent)).all())
+    return {"ideas_checked": ideas, "events": events}
 
 
 # ---------------------------------------------------------------------------

@@ -335,7 +335,7 @@ class TestProjectPages:
 
     def test_portfolio_page_and_clean_index(self):
         r = client.get("/portfolio")   # редирект доводит до рабочего стола
-        assert r.status_code == 200 and "Рабочий стол" in r.text
+        assert r.status_code == 200 and "Кабинет" in r.text
         home = client.get("/").text
         assert "Мои проекты" not in home            # кабинет ушёл с главной
         assert "/desk" in home                      # владельцу — на рабочий стол
@@ -378,11 +378,14 @@ class TestWaitlist:
     def test_waitlist_validation(self):
         assert client.post("/api/waitlist", json={"contact": "ab"}).status_code == 400
 
-    def test_gate_in_homepage(self):
+    def test_free_demand_check_in_homepage(self):
+        """v2: вместо гейта «закрытого режима» -- открытая бесплатная проверка
+        спроса без регистрации (вход воронки)."""
         home = client.get("/").text
-        assert "закрытом режиме" in home
-        assert "лист ожидания" in home.lower() or "В список" in home
-        assert 'prompt("Ключ владельца Создателя:")' not in home  # голого prompt больше нет
+        assert "Проверить спрос — бесплатно" in home
+        assert "/api/demand" in home
+        assert "без регистрации" in home
+        assert 'prompt("Ключ владельца Создателя:")' not in home  # голого prompt по-прежнему нет
 
 
 class TestPresets:
@@ -427,12 +430,12 @@ class TestDesk:
     def test_desk_page_and_clean_index(self):
         r = client.get("/desk")
         assert r.status_code == 200
-        assert "Рабочий стол" in r.text
+        assert "Кабинет" in r.text and "Мои" in r.text
         assert "следующий шаг" in r.text.lower() or "next" in r.text
         home = client.get("/").text
         assert "Рабочий стол · мои проекты" not in home   # стол ушёл с главной
         assert "deskPresets" not in home                  # пресеты тоже
-        assert "path" in home and "Формулировка" in home         # таймлайн остался гостю
+        assert 'id="path"' in home and "Спрос" in home    # путь 0->7 виден гостю
 
     def test_cabinet_has_next_step_and_progress(self):
         client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
@@ -474,9 +477,12 @@ class TestNightPolish:
     def test_no_prompts_on_desk_and_manrope_everywhere(self):
         desk = client.get("/desk").text
         assert "prompt(" not in desk.replace("password", "")  # форма вместо диалогов
-        for page in ("/", "/desk"):
-            html = client.get(page).text
-            assert "Manrope" in html and "Unbounded" not in html
+        # v2.4: единая система на всех страницах -- IBM Plex Sans + Mono,
+        # без Manrope и декоративных дисплей-шрифтов.
+        assert "IBM Plex Sans" in desk and "Manrope" not in desk and "Unbounded" not in desk
+        home = client.get("/").text
+        assert "Unbounded" not in home and "IBM Plex Sans" in home
+        assert "prompt(" not in home
 
     def test_project_page_has_chart_and_autorefresh(self):
         client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
@@ -487,15 +493,19 @@ class TestNightPolish:
 
 
 class TestMorningPass:
-    def test_no_loop_query_param(self):
+    def test_homepage_wires_demand_check(self):
+        """v1-петля ?new ушла вместе со старой главной; v2-главная обязана
+        уметь одно: отправить идею в /api/demand и показать цифры."""
         home = client.get("/").text
-        assert 'location.search.includes("new")' in home   # петля разорвана
-        assert 'go.click();' in home                        # ключ -> продолжаем действие
+        assert "/api/demand" in home
+        assert "freq-num" in home       # маркерные цифры спроса
+        assert "background-image" not in home  # клетчатый фон не возвращается
 
     def test_no_jargon_on_pages(self):
         home = client.get("/").text
         assert "оффер" not in home.lower()
-        assert "Разобрать идею" in home
+        assert "лендинг" not in home.lower()
+        assert "Опишите идею" in home
         desk = client.get("/desk").text
         assert "оффер" not in desk.lower()
 
@@ -514,3 +524,213 @@ class TestMorningPass:
             "offer": dict(VALID_OFFER, idea_id="legal_v1")})
         page = client.get("/l/legal_v1").text
         assert "/legal" in page and "соглашаетесь" in page
+
+
+# ---------------------------------------------------------------------------
+# Ступень «Спрос» (app/demand.py)
+# ---------------------------------------------------------------------------
+
+from app.demand import (  # noqa: E402
+    DemandError, check_demand, generate_formulations, _parse_search_xml, _verdict,
+)
+
+
+def _demand_post(counts=None, search_xml=None):
+    """Единый фейковый _post: провайдеры yandex (LLM) / wordstat / search."""
+    counts = counts or {}
+    async def fake(provider, payload):
+        if provider == "yandex":  # LLM: формулировки
+            return _yandex_response(json.dumps(
+                ["ответы на отзывы вайлдберриз", "сервис ответов на отзывы", "автоответ на отзывы озон"],
+                ensure_ascii=False))
+        if provider == "wordstat":
+            return {"totalCount": counts.get(payload["phrase"])}
+        if provider == "search":
+            import base64 as _b64
+            xml = search_xml or (
+                '<yandexsearch><response><found priority="all">15000</found>'
+                '<results><grouping><group><doc><url>https://example.ru/x</url>'
+                '<title>Пример конкурента</title></doc></group></grouping></results>'
+                '</response></yandexsearch>')
+            return {"rawData": _b64.b64encode(xml.encode()).decode()}
+        raise AssertionError(f"unexpected provider {provider}")
+    return fake
+
+
+class TestDemand:
+    def test_short_idea_rejected(self):
+        with pytest.raises(DemandError):
+            asyncio.run(generate_formulations("коротко"))
+
+    def test_full_check_happy_path(self):
+        post = _demand_post(counts={
+            "ответы на отзывы вайлдберриз": 5200,
+            "сервис ответов на отзывы": 900,
+            "автоответ на отзывы озон": 340,
+        })
+        out = asyncio.run(check_demand("Сервис отвечает на отзывы за селлеров маркетплейсов", _post=post))
+        assert len(out["formulations"]) == 3
+        assert out["best_phrase"] == "ответы на отзывы вайлдберриз"
+        assert out["verdict"]["level"] == "strong"
+        assert out["competitors"]["found"] == 15000
+        assert out["competitors"]["top"][0]["domain"] == "example.ru"
+
+    def test_wordstat_unavailable_degrades_not_fails(self):
+        """Нет токена/квоты Вордстата -- counts=None, вердикт unknown, но ответ есть."""
+        async def post(provider, payload):
+            if provider == "yandex":
+                return _yandex_response(json.dumps(["a b", "c d", "e f"]))
+            if provider == "wordstat":
+                raise RuntimeError("боевой сбой сети")
+            return {"rawData": None}
+        out = asyncio.run(check_demand("Достаточно длинное описание идеи для проверки", _post=post))
+        assert all(f["count"] is None for f in out["formulations"])
+        assert out["verdict"]["level"] == "unknown"
+        assert out["competitors"] == {"found": None, "top": []}
+
+    def test_verdict_tiers(self):
+        assert _verdict(None)["level"] == "unknown"
+        assert _verdict(100)["level"] == "weak"
+        assert _verdict(500)["level"] == "niche"
+        assert _verdict(5000)["level"] == "strong"
+
+    def test_parse_search_xml_limits_top3(self):
+        docs = "".join(
+            f"<doc><url>https://www.site{i}.ru/p</url><title>T{i}</title></doc>" for i in range(5))
+        xml = f'<y><found priority="all">42</found>{docs}</y>'
+        out = _parse_search_xml(xml)
+        assert out["found"] == 42
+        assert len(out["top"]) == 3
+        assert out["top"][0]["domain"] == "site0.ru"  # www. срезан
+
+    def test_api_demand_endpoint_public(self):
+        """Роут /api/demand не требует owner-ключа (вход воронки)."""
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [], "best_phrase": "", 
+                    "verdict": {"level": "unknown", "text": ""},
+                    "competitors": {"found": None, "top": []}}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            r = client.post("/api/demand", json={"idea": "Достаточно длинная идея для эндпоинта"})
+            assert r.status_code == 200 and r.json()["ok"] is True
+        finally:
+            m.check_demand = orig
+
+
+class TestIdeaSuggest:
+    def test_generate_idea_via_llm(self):
+        from app.demand import generate_idea
+        async def post(provider, payload):
+            assert provider == "yandex"
+            return _yandex_response('"Сервис выездной заточки ножей для домашних кухонь по подписке."')
+        out = asyncio.run(generate_idea(_post=post))
+        assert out.startswith("Сервис выездной")   # кавычки срезаны
+        assert len(out) >= 15
+
+    def test_api_idea_endpoint_public(self):
+        import app.main as m
+        async def fake_gen():
+            return "Достаточно длинная сгенерированная идея для теста"
+        orig = m.generate_idea
+        m.generate_idea = fake_gen
+        try:
+            r = client.post("/api/idea")
+            assert r.status_code == 200
+            assert r.json()["ok"] is True and "идея" in r.json()["idea"]
+        finally:
+            m.generate_idea = orig
+
+    def test_homepage_has_idea_button(self):
+        home = client.get("/").text
+        assert "Придумать за меня" in home and "/api/idea" in home
+
+
+class TestScores:
+    def test_demand_score_mapping(self):
+        from app.demand import _demand_score
+        assert _demand_score(None) is None
+        assert _demand_score(10) == 1
+        assert _demand_score(400) == 4
+        assert _demand_score(5000) == 8
+        assert _demand_score(60000) == 10
+
+    def test_check_demand_includes_scores(self):
+        """Два разных yandex-вызова в одной проверке: формулировки и оценка."""
+        score_json = json.dumps({"competition": 7, "timing": 8, "execution": 6,
+            "notes": {"competition": "ниша свободна", "timing": "рынок готов", "execution": "можно за месяц"}},
+            ensure_ascii=False)
+        async def post(provider, payload):
+            if provider == "yandex":
+                if "шкалам" in payload["instructions"]:
+                    return _yandex_response(score_json)
+                return _yandex_response(json.dumps(["фразы один", "фразы два", "фразы три"], ensure_ascii=False))
+            if provider == "wordstat":
+                return {"totalCount": 5000}
+            return {"rawData": None}
+        out = asyncio.run(check_demand("Достаточно длинная идея для проверки оценок", _post=post))
+        keys = [s["key"] for s in out["scores"]]
+        assert keys == ["demand", "competition", "timing", "execution"]
+        assert out["scores"][0]["value"] == 8      # спрос из данных, не из LLM
+        assert out["scores"][1]["note"] == "ниша свободна"
+
+    def test_scores_degrade_without_llm_score(self):
+        """LLM-оценка упала -- остаётся шкала спроса из данных, ответ живой."""
+        async def post(provider, payload):
+            if provider == "yandex":
+                if "шкалам" in payload["instructions"]:
+                    raise RuntimeError("боевой сбой")
+                return _yandex_response(json.dumps(["a b", "c d", "e f"]))
+            if provider == "wordstat":
+                return {"totalCount": 700}
+            return {"rawData": None}
+        out = asyncio.run(check_demand("Достаточно длинная идея для деградации оценки", _post=post))
+        assert [s["key"] for s in out["scores"]] == ["demand"]
+        assert out["scores"][0]["value"] == 4   # 700/мес -> диапазон 300..1000
+
+    def test_homepage_renders_score_block(self):
+        home = client.get("/").text
+        assert 'id="score-card"' in home and "Оценка идеи" in home
+        assert "инструкцией безопаснее" not in home   # блок ушёл в плейбук этапа 4
+
+
+class TestOverallAndStats:
+    def test_overall_score_and_weakest(self):
+        score_json = json.dumps({"competition": 3, "timing": 8, "execution": 7,
+            "notes": {"competition": "рынок забит", "timing": "", "execution": ""}}, ensure_ascii=False)
+        async def post(provider, payload):
+            if provider == "yandex":
+                if "шкалам" in payload["instructions"]:
+                    return _yandex_response(score_json)
+                return _yandex_response(json.dumps(["a b", "c d", "e f"]))
+            if provider == "wordstat":
+                return {"totalCount": 5000}   # спрос = 8
+            return {"rawData": None}
+        out = asyncio.run(check_demand("Достаточно длинная идея для общего балла", _post=post))
+        assert out["overall"]["value"] == round((8 + 3 + 8 + 7) / 4)
+        assert out["overall"]["weakest"] == "Конкуренция"
+
+    def test_demand_check_persisted_and_stats(self):
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "a", "count": 123}], "best_phrase": "a",
+                    "verdict": {"level": "weak", "text": ""},
+                    "competitors": {"found": None, "top": []}, "scores": [], "overall": None}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            before = client.get("/api/stats").json()["ideas_checked"]
+            r = client.post("/api/demand", json={"idea": "Достаточно длинная идея для счётчика"})
+            assert r.status_code == 200
+            after = client.get("/api/stats").json()["ideas_checked"]
+            assert after == before + 1
+        finally:
+            m.check_demand = orig
+
+    def test_homepage_overall_and_live_counter(self):
+        home = client.get("/").text
+        assert 'id="overall"' in home and "/api/stats" in home
+        assert "порог конверсии живой идеи" not in home   # голая метрика из статистики убрана
+        assert 'id="stat-ideas"' in home                  # вместо неё живой счётчик
+        assert 'id="press"' in home         # блок прессы готов, ждёт URL

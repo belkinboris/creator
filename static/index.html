@@ -25,7 +25,7 @@
     .result.show{animation:none}}
   body{background:var(--bg);color:var(--ink);
     font:400 16px/1.55 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:760px;margin:0 auto;
+  .wrap{max-width:760px;margin:0 auto;padding-left:22px;padding-right:22px;
     padding-left:max(var(--pad), env(safe-area-inset-left));
     padding-right:max(var(--pad), env(safe-area-inset-right))}
   a{color:var(--ink)}
@@ -85,6 +85,24 @@
   .err{display:none;margin-top:10px;color:var(--bad);font-size:15px}
   .err.show{display:block}
 
+  .overall{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:2px 0 14px}
+  .overall-val{font:600 40px/1 "IBM Plex Mono",monospace;
+    background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 4px}
+  .overall-note{color:var(--muted);font-size:15px}
+  .score-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .score-cell{background:var(--box);padding:14px 12px}
+  .score-val{font:600 24px/1 "IBM Plex Mono",monospace;display:inline-block;
+    background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 3px}
+  .score-max{font:500 12px "IBM Plex Mono",monospace;color:var(--muted);margin-left:2px}
+  .score-label{font-size:13px;font-weight:600;margin-top:7px}
+  .score-note{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;padding:34px 0}
+  .stat b{font:600 26px/1 "IBM Plex Mono",monospace;display:inline-block;
+    background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 3px}
+  .stat span{display:block;font-size:13.5px;color:var(--muted);margin-top:7px;max-width:11em}
+
   section.band{border-top:1px solid var(--line);padding:38px 0 30px}
   h2{font-size:22px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px}
   .band-sub{color:var(--muted);margin-bottom:20px;max-width:38em;font-size:15px}
@@ -110,6 +128,8 @@
     .checker{padding:15px}
     .checker-foot .btn,.checker-foot .btn-ghost{width:100%;text-align:center}
     .freq-row{flex-direction:column;align-items:flex-start;gap:3px}
+    .score-grid{grid-template-columns:1fr 1fr}
+    .stats{grid-template-columns:1fr 1fr;gap:22px 14px;padding:28px 0}
   }
 </style>
 </head>
@@ -147,6 +167,14 @@
         <div id="freqs"></div>
         <div id="verdict-wrap"></div>
       </div>
+      <div class="res-block" id="score-card" style="display:none">
+        <div class="res-title">Оценка идеи</div>
+        <div class="overall" id="overall" style="display:none">
+          <span class="overall-val" id="overall-val"></span>
+          <span class="overall-note" id="overall-note"></span>
+        </div>
+        <div class="score-grid" id="scores"></div>
+      </div>
       <div class="res-block" id="comp-card" style="display:none">
         <div class="res-title">Кто уже отвечает на этот спрос</div>
         <div id="comps"></div>
@@ -172,10 +200,24 @@
       <div class="step"><span class="n">7</span><div><h3>Повторяемость</h3><p>Проверяем, что продажи — не случайность: канал стабильно приводит клиентов по известной цене.</p></div></div>
       <div class="step"><span class="n">8</span><div><h3>Удержание</h3><p>Клиенты возвращаются и рекомендуют. Здесь идея становится бизнесом.</p></div></div>
     </div>
-    <div class="note">
-      <b>Почему с инструкцией безопаснее.</b> Например, при запуске рекламы Яндекс предложит «простой» путь — такую кампанию нельзя выключить первые 30 дней, и она тратит деньги, даже если вы передумали. Мы ведём мимо таких ям: на каждом шаге — что нажать, что увидите и что дальше.
+  </section>
+  <section class="band wrap">
+    <div class="stats">
+      <div class="stat"><b>0 ₽</b><span>стоит проверка спроса</span></div>
+      <div class="stat"><b>2 мин</b><span>от идеи до цифр Яндекса</span></div>
+      <div class="stat"><b>8</b><span>ступеней от идеи до денег</span></div>
+      <div class="stat" id="stat-ideas" style="display:none"><b id="stat-ideas-n"></b><span>идей уже проверено здесь</span></div>
     </div>
   </section>
+
+  <section class="band wrap" id="press" hidden>
+    <p class="band-sub" style="margin-bottom:10px">Мы в медиа</p>
+    <p class="press-links">
+      <a href="URL_VC" rel="noopener">Статья о Создателе на vc.ru</a> ·
+      <a href="URL_DZEN" rel="noopener">Разбор в Дзене</a>
+    </p>
+  </section>
+  <!-- press: подставить настоящие URL вместо URL_VC / URL_DZEN и убрать hidden -->
 </main>
 
 <footer>
@@ -202,7 +244,7 @@ ideaBtn.addEventListener('click', async () => {
   try {
     const r = await fetch('/api/idea', {method: 'POST'});
     const data = await r.json();
-    if (!r.ok || !data.ok) throw new Error(data.error || 'Не получилось придумать идею. Попробуйте ещё раз.');
+    if (!r.ok || !data.ok) throw new Error(data.error || data.detail || 'Не получилось придумать идею. Попробуйте ещё раз.');
     ideaEl.value = data.idea;
     ideaEl.focus();
   } catch (e) {
@@ -230,7 +272,7 @@ btn.addEventListener('click', async () => {
       body: JSON.stringify({idea})
     });
     const data = await r.json();
-    if (!r.ok || !data.ok) throw new Error(data.error || 'Сервис сейчас перегружен. Попробуйте через минуту.');
+    if (!r.ok || !data.ok) throw new Error(data.error || data.detail || 'Сервис сейчас перегружен. Попробуйте через минуту.');
 
     document.getElementById('freqs').innerHTML = data.formulations.map(f => `
       <div class="freq-row">
@@ -244,6 +286,26 @@ btn.addEventListener('click', async () => {
     const v = data.verdict || {};
     document.getElementById('verdict-wrap').innerHTML =
       `<div class="verdict ${v.level || 'unknown'}">${escapeHtml(v.text || '')}</div>`;
+
+    const sc = data.scores || [];
+    const scoreCard = document.getElementById('score-card');
+    if (sc.length) {
+      scoreCard.style.display = '';
+      const ov = data.overall;
+      const ovEl = document.getElementById('overall');
+      if (ov && ov.value !== null) {
+        ovEl.style.display = '';
+        document.getElementById('overall-val').textContent = ov.value + '/10';
+        document.getElementById('overall-note').textContent =
+          ov.weakest ? 'Слабое место — ' + ov.weakest.toLowerCase() : '';
+      } else { ovEl.style.display = 'none'; }
+      document.getElementById('scores').innerHTML = sc.map(s => `
+        <div class="score-cell">
+          <div><span class="score-val">${s.value === null ? '—' : escapeHtml(String(s.value))}</span><span class="score-max">/10</span></div>
+          <div class="score-label">${escapeHtml(s.label)}</div>
+          ${s.note ? `<div class="score-note">${escapeHtml(s.note)}</div>` : ''}
+        </div>`).join('');
+    } else { scoreCard.style.display = 'none'; }
 
     const comp = data.competitors || {};
     const compCard = document.getElementById('comp-card');
@@ -264,6 +326,17 @@ btn.addEventListener('click', async () => {
     btn.textContent = label;
   }
 });
+
+(async () => {  // живой счётчик: показываем, когда есть что показать
+  try {
+    const r = await fetch('/api/stats');
+    const st = await r.json();
+    if (st.ideas_checked >= 10) {
+      document.getElementById('stat-ideas-n').textContent = st.ideas_checked.toLocaleString('ru-RU');
+      document.getElementById('stat-ideas').style.display = '';
+    }
+  } catch (e) { /* счётчик не критичен */ }
+})();
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

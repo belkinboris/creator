@@ -218,9 +218,80 @@ async def check_demand(idea: str, *, _post=None) -> dict:
     known = [c for c in counts if c is not None]
     best_idx = counts.index(max(known)) if known else 0
     comp = await competitors(phrases[best_idx], _post=_post)
+    best = max(known) if known else None
+    llm_scores = await score_idea(idea, rows, comp, _post=_post)
+    scores = [{"key": "demand", "label": "Спрос", "value": _demand_score(best), "note": ""}]
+    scores += llm_scores or []
+    # Один общий балл читается за секунду; 4 шкалы -- расшифровка под ним.
+    rated = [s for s in scores if s["value"] is not None]
+    overall = None
+    if rated:
+        weakest = min(rated, key=lambda s: s["value"])
+        overall = {"value": round(sum(s["value"] for s in rated) / len(rated)),
+                   "weakest": weakest["label"]}
     return {
         "formulations": rows,
         "best_phrase": phrases[best_idx],
-        "verdict": _verdict(max(known) if known else None),
+        "verdict": _verdict(best),
         "competitors": comp,
+        "scores": scores,
+        "overall": overall,
     }
+
+
+# ---------------------------------------------------------------------------
+# Оценка идеи по 4 шкалам (стиль DimeADozen, адаптированный под РФ):
+# «Спрос» -- детерминированно из цифр Вордстата (данные, не мнение);
+# остальные три -- LLM с контекстом реальных конкурентов из выдачи.
+# ---------------------------------------------------------------------------
+
+_SCORE_SYSTEM = (
+    "Оцени бизнес-идею для российского рынка по трём шкалам от 1 до 10:\n"
+    "competition -- насколько легко выделиться (10 = ниша свободна, 1 = рынок забит сильными игроками);\n"
+    "timing -- своевременность (10 = рынок готов именно сейчас, 1 = слишком рано или поздно);\n"
+    "execution -- реализуемость силами одного человека или маленькой команды (10 = можно запустить за недели).\n"
+    "Учитывай переданные данные о конкурентах в выдаче. К каждой шкале -- одно короткое пояснение "
+    "обычными словами (до 12 слов). Ответь ТОЛЬКО JSON вида "
+    '{"competition": n, "timing": n, "execution": n, '
+    '"notes": {"competition": "...", "timing": "...", "execution": "..."}} без пояснений вокруг.'
+)
+
+_SCORE_LABELS = (("competition", "Конкуренция"), ("timing", "Своевременность"), ("execution", "Реализуемость"))
+
+
+def _demand_score(best_count: int | None) -> int | None:
+    """Шкала спроса из частотности -- по данным, без участия модели."""
+    if best_count is None:
+        return None
+    for threshold, score in ((50_000, 10), (20_000, 9), (THRESHOLD_STRONG, 8),
+                             (1_000, 6), (THRESHOLD_NICHE, 4), (50, 2)):
+        if best_count >= threshold:
+            return score
+    return 1
+
+
+async def score_idea(idea: str, rows: list, comp: dict, *, _post=None) -> list | None:
+    """Три LLM-шкалы с контекстом реальной выдачи. None при любой проблеме --
+    блок оценки просто не показывается, проверка спроса работает без него."""
+    context = json.dumps({
+        "идея": idea[:MAX_IDEA_CHARS],
+        "частотности": rows,
+        "конкуренты_в_выдаче": comp.get("top", []),
+        "страниц_в_выдаче": comp.get("found"),
+    }, ensure_ascii=False)
+    try:
+        text = await llm_adapter.call(_SCORE_SYSTEM, context, 800, _post=_post)
+        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        data = json.loads(text)
+        notes = data.get("notes") or {}
+        out = []
+        for key, label in _SCORE_LABELS:
+            value = int(data[key])
+            if not 1 <= value <= 10:
+                raise ValueError(f"{key} out of range")
+            out.append({"key": key, "label": label, "value": value,
+                        "note": str(notes.get(key, ""))[:140]})
+        return out
+    except Exception:
+        logger.warning("score_idea failed", exc_info=True)
+        return None

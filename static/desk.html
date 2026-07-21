@@ -1,95 +1,99 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Рабочий стол — Создатель</title>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Кабинет — Создатель</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
-  :root{--blueprint:#11263F;--line:rgba(214,228,244,.16);--ink:#EAF2FB;
-    --muted:#8FA6BF;--accent:#FF8A2A;--ok:#4CC38A;--card:#0C1D31}
+  /* Та же система, что на главной: бумага, чернила, жёлтый маркер. */
+  :root{--bg:#FBF6EA;--box:#FFFDF6;--line:#E9E1CB;--ink:#1B1C20;--muted:#6F6A5C;
+    --marker:#FFDE59;--btn:#1B1C20;--ok:#2E7D4F;--pad:22px}
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--blueprint);
-    background-image:linear-gradient(var(--line) 1px,transparent 1px),
-      linear-gradient(90deg,var(--line) 1px,transparent 1px);
-    background-size:28px 28px;color:var(--ink);
-    font:400 17px/1.5 "Onest",system-ui,sans-serif;min-height:100vh}
-  .wrap{max-width:980px;margin:0 auto;padding:36px 20px 80px}
-  a{color:var(--accent);text-decoration:none}
-  .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:6px}
-  h1{font:700 clamp(26px,5vw,36px)/1.1 "Manrope",sans-serif}
-  .sub{color:var(--muted);font-size:15px;margin-bottom:28px}
+  body{background:var(--bg);color:var(--ink);
+    font:400 16px/1.55 "IBM Plex Sans",system-ui,sans-serif;min-height:100vh;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:980px;margin:0 auto;padding:30px 22px 80px;
+    padding-left:max(var(--pad), env(safe-area-inset-left));
+    padding-right:max(var(--pad), env(safe-area-inset-right))}
+  a{color:var(--ink)}
+  .top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:4px}
+  h1{font-size:clamp(24px,4.4vw,32px);font-weight:600;letter-spacing:-.015em}
+  h1 .hl{background:linear-gradient(transparent 58%, var(--marker) 58%);padding:0 2px}
+  .top a{color:var(--muted);text-decoration:none;font-size:14px}
+  .top a:hover{color:var(--ink);text-decoration:underline}
+  .sub{color:var(--muted);font-size:15px;margin-bottom:24px}
 
-  /* Одна сетка — все проекты одинаковыми карточками */
   .grid{display:grid;gap:14px}
   @media(min-width:720px){.grid{grid-template-columns:1fr 1fr}}
-  .p{background:var(--card);border:1px solid var(--line);border-radius:14px;
-    padding:18px;display:flex;flex-direction:column;gap:10px;position:relative}
-  .p .kind{font:400 11px "JetBrains Mono",monospace;letter-spacing:.1em;
+  .p{background:var(--box);border:1px solid var(--line);border-radius:8px;
+    padding:18px;display:flex;flex-direction:column;gap:10px}
+  .p .kind{font:600 11px "IBM Plex Mono",monospace;letter-spacing:.08em;
     text-transform:uppercase;color:var(--muted)}
-  .p h2{font:700 21px "Manrope",sans-serif}
-  .stage{font:700 12px "JetBrains Mono",monospace;letter-spacing:3px;color:var(--muted)}
-  .stage b{color:var(--accent)}
-  .stage .nm{letter-spacing:0;font-family:"Onest";font-weight:600;color:var(--ink);margin-left:8px}
+  .p h2{font-size:19px;font-weight:600;letter-spacing:-.01em}
+  .stage{font:600 12px "IBM Plex Mono",monospace;letter-spacing:2px;color:var(--muted)}
+  .stage b{color:var(--ink);background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 2px}
+  .stage .nm{letter-spacing:0;font-family:"IBM Plex Sans";font-weight:600;color:var(--ink);margin-left:8px}
 
-  /* Цифры — главное на карточке */
   .nums{display:flex;gap:22px;margin-top:2px}
-  .n .v{font:700 30px/1 "Manrope",sans-serif}
-  .n .l{font:400 11px "JetBrains Mono",monospace;text-transform:uppercase;
+  .n .v{font:600 26px/1 "IBM Plex Mono",monospace}
+  .n .l{font:500 11px "IBM Plex Mono",monospace;text-transform:uppercase;
     letter-spacing:.08em;color:var(--muted);margin-top:4px}
-  .bar{height:6px;background:#081526;border-radius:99px;overflow:hidden}
-  .bar i{display:block;height:100%;background:var(--accent);border-radius:99px}
-  .verdict{font:700 12px "JetBrains Mono",monospace;color:var(--accent)}
-  .next{background:#081526;border-left:3px solid var(--accent);border-radius:0 8px 8px 0;
-    padding:10px 12px;font-size:14px;color:var(--ink)}
-  .next span{display:block;font:400 10px "JetBrains Mono",monospace;
+  .bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--marker);border-radius:99px}
+  .verdict{font:600 13px "IBM Plex Mono",monospace}
+  .next{border-left:3px solid var(--marker);padding:2px 0 2px 12px;font-size:14px}
+  .next span{display:block;font:600 10px "IBM Plex Mono",monospace;
     text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:3px}
   .acts{margin-top:auto;display:flex;gap:8px;flex-wrap:wrap}
-  .btn{border:1.5px solid var(--accent);background:transparent;color:var(--accent);
-    border-radius:9px;padding:9px 14px;font:600 14px "Onest";cursor:pointer}
-  .btn:hover{background:var(--accent);color:#1A0E00}
-  .btn.ghost{border-color:var(--line);color:var(--muted)}
-  .btn.ghost:hover{background:transparent;border-color:var(--accent);color:var(--accent)}
+  .btn{border:0;background:var(--btn);color:#fff;border-radius:6px;
+    padding:9px 14px;font:600 14px "IBM Plex Sans";cursor:pointer}
+  .btn:hover{background:#000}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+  .btn.ghost:hover{border-color:var(--ink);background:transparent}
+  .btn[disabled]{opacity:.55;cursor:wait}
 
-  .new{border:1.5px dashed var(--line);border-radius:14px;padding:18px;
+  .new{border:1px solid var(--line);background:transparent;border-radius:8px;padding:18px;
     display:flex;flex-direction:column;justify-content:center;gap:8px;min-height:150px}
-  .new h2{font:700 19px "Manrope",sans-serif;color:var(--muted)}
+  .new h2{font-size:17px;font-weight:600;color:var(--ink)}
   .new p{font-size:14px;color:var(--muted)}
   .wl{margin-top:22px;font-size:14px;color:var(--muted)}
-  #gate{max-width:420px;margin:60px auto;background:var(--card);border:1px solid var(--line);
-    border-radius:14px;padding:22px}
-  #gate input{width:100%;padding:12px;margin:10px 0;border:1.5px solid var(--line);
-    border-radius:9px;background:#081526;color:var(--ink);font:inherit}
+  #gate{max-width:420px;margin:60px auto;background:var(--box);border:1px solid var(--line);
+    border-radius:8px;padding:22px}
+  #gate h2{font-size:19px;font-weight:600;margin-bottom:4px}
+  #gate p{color:var(--muted);font-size:14px}
+  input,select{width:100%;padding:11px 12px;margin:10px 0 0;border:1px solid var(--line);
+    border-radius:6px;background:#fff;color:var(--ink);font:inherit}
+  #gate .btn{margin-top:12px}
+  #form{display:none;margin-top:14px;background:var(--box);
+    border:1px solid var(--ink);border-radius:8px;padding:18px;max-width:520px}
+  #form h3{font-size:16px;font-weight:600;margin-bottom:4px}
+  #form .row{display:flex;gap:8px;margin-top:12px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div id="gate">
-    <h2 style="font:800 20px Manrope;margin-bottom:6px">Рабочий стол</h2>
-    <p style="color:var(--muted);font-size:14px">Введите ключ владельца.</p>
+    <h2>Кабинет</h2>
+    <p>Введите ключ владельца.</p>
     <input type="password" id="key" placeholder="Ключ доступа">
     <button class="btn" onclick="enter()">Войти</button>
   </div>
 
   <div id="desk" style="display:none">
     <div class="top">
-      <h1>Рабочий стол</h1>
-      <a href="/">Как это работает →</a>
+      <h1>Мои <span class="hl">проекты</span></h1>
+      <a href="/">На главную →</a>
     </div>
-    <p class="sub">Каждый проект — где он, что показывают цифры и что делать дальше.</p>
+    <p class="sub">Каждый проект — где он на пути 0→7, что показывают цифры и что делать дальше.</p>
     <div class="grid" id="grid"></div>
 
-    <div id="form" style="display:none;margin-top:14px;background:var(--card);
-      border:1px solid var(--accent);border-radius:14px;padding:18px;max-width:520px">
-      <h3 id="formTitle" style="font:800 17px Manrope;margin-bottom:12px">Проект</h3>
-      <input id="fName" placeholder="Название" style="width:100%;padding:11px;margin-bottom:8px;
-        border:1.5px solid var(--line);border-radius:9px;background:#081526;color:var(--ink);font:inherit">
-      <select id="fStage" style="width:100%;padding:11px;margin-bottom:8px;border:1.5px solid var(--line);
-        border-radius:9px;background:#081526;color:var(--ink);font:inherit"></select>
-      <input id="fNote" placeholder="Что происходит сейчас (одной строкой)" style="width:100%;padding:11px;
-        margin-bottom:8px;border:1.5px solid var(--line);border-radius:9px;background:#081526;color:var(--ink);font:inherit">
-      <input id="fLink" placeholder="Ссылка на проект (можно пусто)" style="width:100%;padding:11px;
-        margin-bottom:12px;border:1.5px solid var(--line);border-radius:9px;background:#081526;color:var(--ink);font:inherit">
-      <div style="display:flex;gap:8px">
+    <div id="form">
+      <h3 id="formTitle">Проект</h3>
+      <input id="fName" placeholder="Название">
+      <select id="fStage"></select>
+      <input id="fNote" placeholder="Что происходит сейчас (одной строкой)">
+      <input id="fLink" placeholder="Ссылка на проект (можно пусто)">
+      <div class="row">
         <button class="btn" id="fSave">Сохранить</button>
         <button class="btn ghost" onclick="closeForm()">Отмена</button>
       </div>
