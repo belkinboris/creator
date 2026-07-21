@@ -3,296 +3,272 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Создатель — проверка бизнес-идеи за 5 дней: спрос, лендинг, вердикт</title>
-<meta name="description" content="Опишите идею — Создатель соберёт проверочную страницу, приведёт людей из Яндекса и вынесет вердикт: есть ли спрос. Дни и ~1500 ₽ вместо полугода разработки вслепую.">
-<meta property="og:title" content="Создатель — проверьте идею до того, как строить продукт">
-<meta property="og:description" content="Идея → страница → живые люди → вердикт. От идеи до денег по этапам, которые нельзя перепрыгнуть.">
+<title>Создатель — от идеи до денег. Бесплатно проверим спрос на вашу идею</title>
+<meta name="description" content="Опишите идею — за 2 минуты покажем, сколько людей уже ищут её в Яндексе и кто ваши конкуренты. Бесплатно. Дальше — проверочная страница, реклама и живые заявки.">
+<meta property="og:title" content="Создатель — от идеи до денег">
+<meta property="og:description" content="Сначала бесплатно проверим спрос: сколько людей ищут вашу идею в Яндексе. Потом — живой тест: страница, реклама, заявки.">
 <meta property="og:type" content="website">
 <meta property="og:locale" content="ru_RU">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
-  /* Чертёжная фаундера: тёмно-синяя калька, белые линии, строительный оранжевый */
+  /* Рабочая тетрадь предпринимателя: бумага, чернила и жёлтый маркер по цифрам */
   :root{
-    --blueprint:#11263F; --line:rgba(214,228,244,.16); --ink:#EAF2FB;
-    --muted:#8FA6BF; --accent:#FF8A2A; --ok:#4CC38A; --card:#0C1D31;
+    --paper:#FBFAF6; --card:#FFFFFF; --border:#E4E1D5; --border-strong:#CFCBBB;
+    --ink:#16192B; --muted:#6B6F80; --action:#2B3BD6; --action-dark:#1F2CA8;
+    --marker:#FFDE59; --ok:#1E9E5A; --warn:#C98A00; --bad:#D64545;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{
-    background:var(--blueprint) ;
-    background-image:linear-gradient(var(--line) 1px,transparent 1px),
-                     linear-gradient(90deg,var(--line) 1px,transparent 1px);
-    background-size:28px 28px;
-    color:var(--ink);font:400 17px/1.55 "Onest",system-ui,sans-serif;
-    -webkit-font-smoothing:antialiased;min-height:100vh;
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+  body{background:var(--paper);color:var(--ink);
+    font:400 17px/1.6 "IBM Plex Sans",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;min-height:100vh}
+  .wrap{max-width:820px;margin:0 auto;padding:0 20px}
+
+  /* Шапка */
+  header{border-bottom:1px solid var(--border);background:var(--card)}
+  .nav{display:flex;align-items:center;justify-content:space-between;padding:16px 0}
+  .logo{font:700 19px "Unbounded",sans-serif;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
+  .logo b{background:linear-gradient(transparent 55%, var(--marker) 55%);font-weight:700}
+  .nav a.link{color:var(--muted);text-decoration:none;font-size:15px;margin-left:22px}
+  .nav a.link:hover{color:var(--ink)}
+  .nav a.link:focus-visible,a:focus-visible,button:focus-visible,textarea:focus-visible{
+    outline:3px solid var(--action);outline-offset:2px;border-radius:4px}
+
+  /* Хиро: действие — тезис */
+  .hero{padding:56px 0 32px}
+  h1{font:700 clamp(28px,5.4vw,44px)/1.15 "Unbounded",sans-serif;letter-spacing:-.02em}
+  h1 .hl{background:linear-gradient(transparent 55%, var(--marker) 55%)}
+  .sub{color:var(--muted);font-size:19px;max-width:34em;margin:14px 0 28px}
+
+  .checker{background:var(--card);border:1px solid var(--border-strong);
+    border-radius:14px;padding:22px;box-shadow:0 1px 2px rgba(22,25,43,.05)}
+  .checker label{display:block;font:600 13px/1 "IBM Plex Sans",sans-serif;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+  .checker textarea{width:100%;min-height:88px;resize:vertical;border:1px solid var(--border-strong);
+    border-radius:10px;padding:12px 14px;font:400 17px/1.5 "IBM Plex Sans",sans-serif;color:var(--ink);background:var(--paper)}
+  .checker textarea::placeholder{color:#A6A9B5}
+  .checker-foot{display:flex;align-items:center;gap:16px;margin-top:14px;flex-wrap:wrap}
+  .btn{appearance:none;border:0;cursor:pointer;border-radius:10px;
+    background:var(--action);color:#fff;font:600 17px "IBM Plex Sans",sans-serif;
+    padding:13px 22px;transition:background .15s}
+  .btn:hover{background:var(--action-dark)}
+  .btn[disabled]{opacity:.6;cursor:wait}
+  .fine{color:var(--muted);font-size:14px}
+
+  /* Результат: маркер по цифрам — фирменный элемент */
+  .result{display:none;margin-top:18px}
+  .result.show{display:block}
+  .res-card{background:var(--card);border:1px solid var(--border-strong);border-radius:14px;
+    padding:22px;margin-bottom:14px}
+  .res-title{font:600 13px/1 "IBM Plex Sans";letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:14px}
+  .freq-row{display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+    padding:11px 0;border-bottom:1px solid var(--border)}
+  .freq-row:last-child{border-bottom:0}
+  .freq-phrase{font-size:17px}
+  .freq-num{font:700 22px/1 "IBM Plex Mono",monospace;white-space:nowrap;
+    background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 4px}
+  .freq-num.na{background:none;color:var(--muted);font-size:15px;font-weight:500}
+  .freq-unit{font:500 13px "IBM Plex Sans";color:var(--muted);margin-left:6px}
+  .verdict{border-left:4px solid var(--border-strong);padding:4px 0 4px 14px;font-size:17px}
+  .verdict.strong{border-color:var(--ok)} .verdict.niche{border-color:var(--warn)}
+  .verdict.weak{border-color:var(--bad)} .verdict.unknown{border-color:var(--border-strong)}
+  .comp-item{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);font-size:16px}
+  .comp-item:last-child{border-bottom:0}
+  .comp-domain{font:500 14px "IBM Plex Mono",monospace;color:var(--muted);white-space:nowrap}
+  .next{background:var(--ink);color:#fff;border-radius:14px;padding:24px}
+  .next h3{font:700 20px "Unbounded",sans-serif;margin-bottom:8px}
+  .next p{color:#C9CBD6;margin-bottom:16px;max-width:36em}
+  .next .btn{background:var(--marker);color:var(--ink)}
+  .next .btn:hover{background:#F5CF3E}
+  .err{display:none;margin-top:12px;color:var(--bad);font-size:16px}
+  .err.show{display:block}
+
+  /* Путь 0→7: структура и есть информация */
+  .path{padding:52px 0 8px}
+  h2{font:700 clamp(22px,3.6vw,30px)/1.2 "Unbounded",sans-serif;margin-bottom:8px}
+  .path-sub{color:var(--muted);margin-bottom:26px;max-width:36em}
+  .steps{counter-reset:step;display:grid;gap:0;position:relative}
+  .step{display:grid;grid-template-columns:44px 1fr;gap:16px;padding:14px 0;position:relative}
+  .step::before{counter-increment:step;content:counter(step);
+    width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font:700 15px "IBM Plex Mono",monospace;background:var(--card);
+    border:2px solid var(--border-strong);color:var(--muted);z-index:1}
+  .step:not(:last-child)::after{content:"";position:absolute;left:16px;top:48px;bottom:-14px;
+    width:2px;background:var(--border-strong)}
+  .step.free::before{border-color:var(--ok);color:var(--ok)}
+  .step h3{font:600 18px "IBM Plex Sans";margin-bottom:2px}
+  .step h3 .tag{font:600 12px "IBM Plex Sans";letter-spacing:.05em;text-transform:uppercase;
+    border-radius:99px;padding:3px 9px;margin-left:8px;vertical-align:2px}
+  .tag.free-tag{background:#E4F5EB;color:var(--ok)}
+  .tag.paid-tag{background:#EEEFF9;color:var(--action)}
+  .step p{color:var(--muted);font-size:16px;max-width:38em}
+
+  /* Как это работает */
+  .how{padding:48px 0}
+  .how-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:22px}
+  .how-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px}
+  .how-card .num{font:700 15px "IBM Plex Mono",monospace;color:var(--action);margin-bottom:8px}
+  .how-card h3{font:600 17px;margin-bottom:6px}
+  .how-card p{color:var(--muted);font-size:15px}
+  .warn-note{margin-top:18px;background:#FFF8E2;border:1px solid #EFD98A;border-radius:12px;
+    padding:16px 18px;font-size:16px}
+  .warn-note b{font-weight:600}
+
+  footer{border-top:1px solid var(--border);margin-top:40px;padding:26px 0;color:var(--muted);font-size:14px}
+  footer a{color:var(--muted)}
+  @media (max-width:560px){
+    .hero{padding:40px 0 24px}
+    .freq-row{flex-direction:column;align-items:flex-start;gap:4px}
   }
-  .wrap{max-width:880px;margin:0 auto;padding:48px 20px 80px}
-  .stamp{font:400 12px/1 "JetBrains Mono",monospace;letter-spacing:.14em;
-    text-transform:uppercase;color:var(--muted);border:1px solid var(--line);
-    display:inline-block;padding:6px 10px;border-radius:4px}
-  h1{font:700 clamp(30px,6vw,46px)/1.12 "Manrope",sans-serif;margin:18px 0 10px}
-  h1 em{font-style:normal;color:var(--accent)}
-  .sub{color:var(--muted);max-width:36em;font-size:18px}
-
-  /* Кабинет: мои проекты */
-  .cab{margin:36px 0 8px}
-  .cab h2{font:600 13px "JetBrains Mono",monospace;letter-spacing:.12em;
-    text-transform:uppercase;color:var(--muted);margin-bottom:12px}
-  .proj{background:var(--card);border:1px solid var(--line);border-radius:12px;
-    padding:14px 16px;margin-bottom:10px;display:flex;flex-wrap:wrap;
-    gap:8px 16px;align-items:center}
-  .proj .pname{font:600 16px "Onest",sans-serif;flex:1 1 160px}
-  .proj .strip{font:700 13px "JetBrains Mono",monospace;letter-spacing:3px;color:var(--muted)}
-  .proj .strip b{color:var(--accent)}
-  .proj .pnote{flex-basis:100%;font-size:14px;color:var(--muted)}
-  .proj a{color:var(--accent);font-size:14px}
-  .cab .add{background:transparent;border:1.5px dashed var(--line);color:var(--muted);
-    border-radius:12px;padding:12px;width:100%;font:500 15px "Onest",sans-serif;cursor:pointer}
-  .cab .add:hover{border-color:var(--accent);color:var(--accent)}
-  .cab .loadbtn{border:1.5px solid var(--line);background:transparent;color:var(--muted);
-    border-radius:10px;padding:11px 16px;font:500 15px "Onest",sans-serif;cursor:pointer}
-  .cab .loadbtn:hover{border-color:var(--accent);color:var(--accent)}
-
-  /* Карта пути: вертикальная лестница этапов */
-  .path{margin:40px 0;display:grid;gap:0}
-  .stage{display:grid;grid-template-columns:56px 1fr;gap:16px;padding:14px 0;
-    border-left:2px solid var(--line);padding-left:18px;position:relative}
-  .stage .num{font:700 15px/1 "JetBrains Mono",monospace;color:var(--muted);
-    background:var(--blueprint);border:1.5px solid var(--line);border-radius:50%;
-    width:40px;height:40px;display:grid;place-items:center;
-    position:absolute;left:-21px;top:12px}
-  .stage.active{border-left-color:var(--accent)}
-  .stage.active .num{border-color:var(--accent);color:var(--accent)}
-  .stage h3{font:600 17px "Onest",sans-serif}
-  .stage p{color:var(--muted);font-size:15px}
-  .stage .lock{font:400 12px "JetBrains Mono",monospace;color:var(--muted)}
-
-  /* Этап 0 живой: форма идеи */
-  .studio{background:var(--card);border:1px solid var(--line);border-radius:14px;
-    padding:22px;margin:8px 0 8px}
-  textarea{width:100%;min-height:110px;padding:14px;font:inherit;color:var(--ink);
-    background:#081526;border:1.5px solid var(--line);border-radius:10px;resize:vertical}
-  textarea:focus{outline:2px solid var(--accent);border-color:var(--accent)}
-  .btn{margin-top:12px;padding:14px 22px;font:600 17px "Onest",sans-serif;border:0;
-    border-radius:10px;background:var(--accent);color:#1A0E00;cursor:pointer}
-  .btn:disabled{opacity:.5;cursor:wait}
-  .btn:focus-visible{outline:3px solid #fff;outline-offset:2px}
-  .copy{border:1.5px solid var(--accent);background:transparent;color:var(--accent);
-    border-radius:9px;font:600 15px "Onest",sans-serif;cursor:pointer}
-  .copy:hover{background:var(--accent);color:#1A0E00}
-  .note{margin-top:10px;font-size:14px;color:var(--muted)}
-  .warn{margin-top:12px;padding:12px 14px;border:1px solid var(--accent);
-    border-radius:10px;color:var(--accent);font-size:15px;display:none}
-
-  /* Варианты */
-  .offers{display:grid;gap:14px;margin-top:18px}
-  @media(min-width:760px){.offers{grid-template-columns:repeat(3,1fr)}}
-  .offer{background:var(--card);border:1px solid var(--line);border-radius:12px;
-    padding:16px;display:flex;flex-direction:column;gap:8px}
-  .offer .angle{font:700 12px "JetBrains Mono",monospace;color:var(--accent);
-    text-transform:uppercase;letter-spacing:.08em}
-  .offer h4{font:600 17px "Onest",sans-serif}
-  .offer p{font-size:14px;color:var(--muted);flex:1}
-  .offer button{padding:11px;font:600 15px "Onest",sans-serif;border:1.5px solid var(--accent);
-    background:transparent;color:var(--accent);border-radius:9px;cursor:pointer}
-  .offer button:hover{background:var(--accent);color:#1A0E00}
-
-  /* Результат запуска */
-  .launched{display:none;margin-top:18px;background:var(--card);
-    border:1px solid var(--ok);border-radius:12px;padding:18px}
-  .launched h4{color:var(--ok);font:600 18px "Onest",sans-serif;margin-bottom:8px}
-  .launched code{font:400 13px "JetBrains Mono",monospace;color:var(--ink);
-    background:#081526;padding:3px 7px;border-radius:6px;word-break:break-all}
-  .launched ol{margin:10px 0 0 20px;color:var(--muted);font-size:15px}
-  .launched a{color:var(--accent)}
-  .queries{margin-top:8px;font-size:14px;color:var(--muted)}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <span class="stamp">Создатель · чертёж № 0.5</span> <a href="/desk" style="float:right;color:var(--accent);font:500 15px Onest">Рабочий стол →</a>
-  <h1>От идеи — до денег.<br>По этапам, <em>которые нельзя перепрыгнуть.</em></h1>
-  <p class="sub">Опишите идею — Создатель соберёт проверочную страницу, приведёт на неё
-  людей из поиска и вынесет вердикт: нужен ли ваш продукт живым людям.
-  Несколько дней и ~1500 ₽ — вместо полугода работы вслепую.</p>
 
-  <div class="path" id="path">
-    <div class="stage active"><span class="num">0</span>
-      <div style="grid-column:2">
-        <h3>Формулировка</h3>
-        <p>Идея превращается в понятное обещание пользы — то, что можно показать людям и рекламе.</p>
-        <div class="studio">
-          <label for="idea" class="note" style="display:block;margin:0 0 8px">
-            Кому и чем помогает ваш продукт? 2–5 предложений.</label>
-          <textarea id="idea" placeholder="Например: сервис, который отвечает на отзывы покупателей за селлеров маркетплейсов — в их тоне, с учётом оценки и текста отзыва."></textarea>
-          <button class="btn" id="go">Разобрать идею</button>
-          <p class="note">Создатель разберёт, кому это нужно и какую боль решает, и вернёт
-          три разных варианта — у каждого готовый заголовок, текст страницы и слова
-          для рекламы. Выберете один — проверочная страница будет опубликована сразу,
-          останется включить рекламу по инструкции.</p>
-          <div class="warn" id="gate" style="display:none;color:var(--ink);border-color:var(--line)">
-            <p style="margin-bottom:8px"><b>Создатель сейчас в закрытом режиме.</b></p>
-            <p style="color:var(--muted);font-size:14px;margin-bottom:10px">Есть ключ доступа — введите его.
-            Нет — оставьте контакт: откроем доступ волнами и напишем вам.</p>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-              <input type="password" id="keyInput" placeholder="Ключ доступа"
-                style="flex:1;min-width:160px;padding:11px;border:1.5px solid var(--line);border-radius:9px;background:#081526;color:var(--ink);font:inherit">
-              <button type="button" class="copy" style="padding:11px 16px" onclick="applyKey()">Войти</button>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <input type="text" id="wlContact" placeholder="Email или @telegram — в лист ожидания"
-                style="flex:1;min-width:160px;padding:11px;border:1.5px solid var(--line);border-radius:9px;background:#081526;color:var(--ink);font:inherit">
-              <button type="button" class="copy" style="padding:11px 16px" onclick="joinWaitlist()">В список</button>
-            </div>
-            <p class="note" id="wlMsg" style="margin-top:8px"></p>
-          </div>
-          <div class="warn" id="warn"></div>
-          <div class="offers" id="offers"></div>
-          <div class="launched" id="launched"></div>
-        </div>
+<header>
+  <div class="wrap nav">
+    <a class="logo" href="/">Созда<b>тель</b></a>
+    <nav>
+      <a class="link" href="#how">Как это работает</a>
+      <a class="link" href="#path">Путь 0→7</a>
+      <a class="link" href="/desk">Кабинет</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <h1>От идеи — до денег.<br>Начнём с <span class="hl">проверки спроса</span>.</h1>
+    <p class="sub">Опишите идею своими словами — за пару минут покажем, сколько людей уже ищут её в Яндексе и кто сейчас забирает этот спрос. Бесплатно, без регистрации.</p>
+
+    <div class="checker">
+      <label for="idea">Опишите идею</label>
+      <textarea id="idea" maxlength="300" placeholder="Например: сервис, который отвечает на отзывы покупателей за продавцов на маркетплейсах"></textarea>
+      <div class="checker-foot">
+        <button class="btn" id="check-btn" type="button">Проверить спрос — бесплатно</button>
+        <span class="fine">2 минуты · без регистрации</span>
+      </div>
+      <p class="err" id="err" role="alert"></p>
+    </div>
+
+    <div class="result" id="result" aria-live="polite">
+      <div class="res-card">
+        <div class="res-title">Сколько ищут в Яндексе · Россия · в месяц</div>
+        <div id="freqs"></div>
+        <div style="margin-top:16px" id="verdict-wrap"></div>
+      </div>
+      <div class="res-card" id="comp-card" style="display:none">
+        <div class="res-title">Кто уже отвечает на этот спрос</div>
+        <div id="comps"></div>
+      </div>
+      <div class="next">
+        <h3>Спрос — это интерес. Проверим готовность платить?</h3>
+        <p>Поиск показывает, что люди ищут. Следующая ступень — узнать, оставят ли они заявку: соберём проверочную страницу под вашу идею, запустим рекламу в Яндексе по инструкции и посчитаем живые заявки.</p>
+        <a class="btn" href="/desk">Запустить проверку на живых людях</a>
       </div>
     </div>
-    <div class="stage active"><span class="num">1</span>
-      <div style="grid-column:2"><h3>Спрос</h3>
-      <p>Проверочная страница + Яндекс Директ. Вердикт: сигнал есть / спроса нет / попробовать другую подачу.</p></div>
+  </section>
+
+  <section class="path wrap" id="path">
+    <h2>Путь от идеи до денег</h2>
+    <p class="path-sub">Восемь ступеней, которые нельзя перепрыгнуть. Каждая отвечает на один вопрос — и только «да» открывает следующую.</p>
+    <div class="steps">
+      <div class="step free"><div></div><div><h3>Идея <span class="tag free-tag">бесплатно</span></h3><p>Формулируем, кому и чем помогает продукт. Заостряем до предложения, за которое люди готовы платить.</p></div></div>
+      <div class="step free"><div></div><div><h3>Спрос <span class="tag free-tag">бесплатно</span></h3><p>Смотрим цифры Яндекса: сколько людей ищут решение и какими словами. И кто уже в выдаче.</p></div></div>
+      <div class="step"><div></div><div><h3>Проверочная страница <span class="tag paid-tag">живой тест</span></h3><p>Собираем страницу под лучшую формулировку — с формой заявки и счётчиком событий.</p></div></div>
+      <div class="step"><div></div><div><h3>Реклама <span class="tag paid-tag">живой тест</span></h3><p>Запускаем Яндекс Директ по пошаговой инструкции — без ям, в которые падают новички.</p></div></div>
+      <div class="step"><div></div><div><h3>Заявки</h3><p>Считаем конверсию из визита в заявку. Выше 2,5% — идея живая, ниже — меняем предложение или аудиторию.</p></div></div>
+      <div class="step"><div></div><div><h3>Первые продажи</h3><p>Превращаем заявки в деньги: скрипт разговора, цена, способ оплаты.</p></div></div>
+      <div class="step"><div></div><div><h3>Повторяемость</h3><p>Проверяем, что продажи — не случайность: канал стабильно приводит клиентов по известной цене.</p></div></div>
+      <div class="step"><div></div><div><h3>Удержание</h3><p>Клиенты возвращаются и рекомендуют. Здесь идея становится бизнесом.</p></div></div>
     </div>
-    <div class="stage"><span class="num">2</span><div style="grid-column:2">
-      <h3>Активация <span class="lock">🔒 до вердикта этапа 1</span></h3>
-      <p>MVP и первые регистрации.</p></div></div>
-    <div class="stage"><span class="num">3</span><div style="grid-column:2">
-      <h3>Первая ценность <span class="lock">🔒</span></h3>
-      <p>Доходят ли люди до «ага-момента».</p></div></div>
-    <div class="stage"><span class="num">4</span><div style="grid-column:2">
-      <h3>Мост к деньгам <span class="lock">🔒</span></h3>
-      <p>От ценности — к тарифам.</p></div></div>
-    <div class="stage"><span class="num">5</span><div style="grid-column:2">
-      <h3>Оплата <span class="lock">🔒</span></h3>
-      <p>Первые деньги.</p></div></div>
-    <div class="stage"><span class="num">6</span><div style="grid-column:2">
-      <h3>Масштаб <span class="lock">🔒</span></h3>
-      <p>Экономика источников.</p></div></div>
-    <div class="stage"><span class="num">7</span><div style="grid-column:2">
-      <h3>Удержание <span class="lock">🔒</span></h3>
-      <p>Продлевают ли второй месяц — здесь решается, бизнес ли это.</p></div></div>
+  </section>
+
+  <section class="how wrap" id="how">
+    <h2>Как это работает</h2>
+    <div class="how-grid">
+      <div class="how-card"><div class="num">1</div><h3>Вы описываете идею</h3><p>Обычными словами, как рассказали бы другу. Никаких бизнес-планов.</p></div>
+      <div class="how-card"><div class="num">2</div><h3>Мы считаем спрос</h3><p>Подбираем поисковые формулировки и берём реальные цифры Яндекса — не мнения, а статистику запросов.</p></div>
+      <div class="how-card"><div class="num">3</div><h3>Вы решаете по цифрам</h3><p>Есть спрос — запускаете живой тест. Нет — переформулируете идею бесплатно, пока не найдёте спрос.</p></div>
+    </div>
+    <div class="warn-note">
+      <b>Почему с инструкцией безопаснее.</b> Например, при запуске рекламы Яндекс предложит «простой» путь — такую кампанию нельзя выключить первые 30 дней, и она тратит деньги, даже если вы передумали. Мы ведём мимо таких ям: на каждом шаге — что нажать, что увидите и что дальше.
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© Создатель · </span><a href="/legal">Правовые документы</a>
   </div>
-  <footer style="margin-top:60px;padding-top:20px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)">
-    Создатель · <a href="/legal" style="color:var(--muted)">Политика персональных данных и условия</a>
-  </footer>
-</div>
+</footer>
 
 <script>
-/* Ключ владельца: спрашивается один раз за сессию вкладки, хранится в
-   переменной (не в localStorage -- сознательно: закрыл вкладку, ввёл снова). */
-let OWNER_KEY = sessionStorage.getItem("sozdatel_key") || "";
-function needKey(){
-  if(OWNER_KEY) return false;
-  const gate = document.getElementById("gate");
-  gate.style.display = "block";
-  gate.scrollIntoView({behavior:"smooth", block:"center"});
-  document.getElementById("keyInput").focus();
-  return true;   // не бросаем исключение — просто показываем ворота
-}
-function ownerHeaders(){
-  return {"Content-Type":"application/json","X-Owner-Key":OWNER_KEY};
-}
-function applyKey(){
-  OWNER_KEY = document.getElementById("keyInput").value.trim();
-  if(OWNER_KEY){
-    sessionStorage.setItem("sozdatel_key", OWNER_KEY);
-    document.getElementById("gate").style.display = "none";
-    go.click();  // человек шёл разбирать идею — продолжаем его действие
-  }
-}
-async function joinWaitlist(){
-  const c = document.getElementById("wlContact").value.trim();
-  const msg = document.getElementById("wlMsg");
-  if(c.length < 4){ msg.textContent = "Оставьте email или @telegram."; return; }
-  try{
-    const r = await fetch("/api/waitlist", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body: JSON.stringify({contact:c})});
-    msg.textContent = r.ok ? "Вы в списке. Напишем, когда откроем доступ." : "Не получилось, попробуйте позже.";
-    if(r.ok) document.getElementById("wlContact").value = "";
-  }catch(e){ msg.textContent = "Не получилось, попробуйте позже."; }
-}
-async function ownerFetch(url, opts){
-  const r = await fetch(url, Object.assign({headers: ownerHeaders()}, opts||{}));
-  if(r.status === 401){
-    OWNER_KEY = ""; sessionStorage.removeItem("sozdatel_key");
-    throw new Error("Неверный ключ доступа — попробуйте ещё раз.");
-  }
-  return r;
-}
+const btn = document.getElementById('check-btn');
+const ideaEl = document.getElementById('idea');
+const errEl = document.getElementById('err');
+const resEl = document.getElementById('result');
 
-/* Владелец с ключом идёт на рабочий стол; ?new=1 (кнопка «Проверить идею»
-   со стола) оставляет его здесь — иначе петля стол→главная→стол */
-if(sessionStorage.getItem("sozdatel_key") && !location.search.includes("new")) location.replace("/desk");
+function fmt(n){ return n.toLocaleString('ru-RU'); }
 
-const ideaEl = document.getElementById("idea");
-const go = document.getElementById("go");
-const offersEl = document.getElementById("offers");
-const warnEl = document.getElementById("warn");
-const launchedEl = document.getElementById("launched");
-
-go.addEventListener("click", async () => {
-  if(needKey()) return;                      // нет ключа -> ворота, кнопка живая
-  if(!ideaEl.value.trim() || ideaEl.value.trim().length < 20){
-    warnEl.textContent = "⚠ Опишите идею хотя бы парой предложений: кому и чем она помогает.";
-    warnEl.style.display = "block"; return;
+btn.addEventListener('click', async () => {
+  errEl.classList.remove('show');
+  const idea = ideaEl.value.trim();
+  if (idea.length < 15) {
+    errEl.textContent = 'Опишите идею хотя бы одним предложением: кому и чем она помогает.';
+    errEl.classList.add('show');
+    return;
   }
-  offersEl.innerHTML = ""; warnEl.style.display = "none"; launchedEl.style.display = "none";
-  go.disabled = true;
-  const phases = ["Изучаю боль…","Ищу, кто её уже гуглит…","Подбираю три угла атаки…",
-                  "Пишу варианты…","Собираю запросы для Директа…","Почти готово…"];
-  let t0 = Date.now(), ph = 0, ticker = null;
-  ticker = setInterval(()=>{
-    const sec = Math.round((Date.now()-t0)/1000);
-    if(sec > 0 && sec % 12 === 0 && ph < phases.length-1) ph++;
-    go.textContent = `${phases[ph]} ${sec} c`;
-  }, 1000);
-  go.textContent = phases[0];
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = 'Считаем спрос…';
   try {
-    const r = await ownerFetch("/api/offers", {method:"POST",
-      body: JSON.stringify({idea: ideaEl.value})});
-    const data = await r.json();
-    if (!data.ok) throw new Error(data.error || "Ошибка");
-    if (data.warning) { warnEl.textContent = "⚠ " + data.warning; warnEl.style.display = "block"; }
-    if (data.sharpened_note) {
-      const n = document.createElement("p"); n.className = "note";
-      n.textContent = "Как я повернул идею: " + data.sharpened_note;
-      offersEl.appendChild(n); n.style.gridColumn = "1/-1";
-    }
-    data.offers.forEach(o => {
-      const card = document.createElement("div"); card.className = "offer";
-      card.innerHTML = `<span class="angle">${o.angle}</span>
-        <h4>${o.h1.replace(/<\/?em>/g,"")}</h4><p>${o.sub}</p>
-        <label style="font-size:12px;color:var(--muted)">Как назовём проект? (можно своё)</label>`;
-      const nameInput = document.createElement("input");
-      nameInput.type = "text"; nameInput.value = o.product_name;
-      nameInput.style.cssText = "width:100%;padding:9px;margin:4px 0 8px;border:1.5px solid var(--line);border-radius:8px;background:#081526;color:var(--ink);font:inherit";
-      card.appendChild(nameInput);
-      const b = document.createElement("button");
-      b.textContent = "Опубликовать эту страницу";
-      b.onclick = () => {
-        const name = nameInput.value.trim();
-        if(name) o.product_name = name;
-        launch(o);
-      };
-      card.appendChild(b); offersEl.appendChild(card);
+    const r = await fetch('/api/demand', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({idea})
     });
-  } catch(e) {
-    if(!String(e.message).includes("ключ доступа")){
-      warnEl.textContent = "⚠ " + e.message; warnEl.style.display = "block";
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || 'Сервис сейчас перегружен. Попробуйте через минуту.');
+
+    document.getElementById('freqs').innerHTML = data.formulations.map(f => `
+      <div class="freq-row">
+        <span class="freq-phrase">${escapeHtml(f.phrase)}</span>
+        <span>${f.count === null
+          ? '<span class="freq-num na">нет данных</span>'
+          : `<span class="freq-num">${fmt(f.count)}</span><span class="freq-unit">запросов/мес</span>`}
+        </span>
+      </div>`).join('');
+
+    const v = data.verdict || {};
+    document.getElementById('verdict-wrap').innerHTML =
+      `<div class="verdict ${v.level || 'unknown'}">${escapeHtml(v.text || '')}</div>`;
+
+    const comp = data.competitors || {};
+    const compCard = document.getElementById('comp-card');
+    if (comp.top && comp.top.length) {
+      compCard.style.display = '';
+      const found = comp.found ? `<div class="fine" style="margin-bottom:10px">В выдаче по запросу «${escapeHtml(data.best_phrase)}» — ${fmt(comp.found)} страниц. Топ сейчас занимают:</div>` : '';
+      document.getElementById('comps').innerHTML = found + comp.top.map(c => `
+        <div class="comp-item"><span class="comp-domain">${escapeHtml(c.domain)}</span><span>${escapeHtml(c.title)}</span></div>`).join('');
+    } else {
+      compCard.style.display = 'none';
     }
-  } finally { if(ticker) clearInterval(ticker); go.disabled = false; go.textContent = "Разобрать идею"; }
+    resEl.classList.add('show');
+    resEl.scrollIntoView({behavior: 'smooth', block: 'start'});
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
 });
 
-async function launch(offer){
-  launchedEl.style.display = "none";
-  const r = await ownerFetch("/api/launch", {method:"POST",
-    body: JSON.stringify({idea_text: ideaEl.value, offer})});
-  const data = await r.json();
-  if (!data.ok) { warnEl.textContent = "⚠ Не удалось запустить"; warnEl.style.display="block"; return; }
-  location.href = `/p/${data.idea_id}`;  // страница проекта: цель, цифры, инструкция Директа
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 </script>
 </body>
