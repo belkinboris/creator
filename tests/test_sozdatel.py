@@ -318,6 +318,41 @@ class TestCabinet:
                            json={"name": "  ", "stage": 1}).status_code == 400
 
 
+class TestDeskOrders:
+    """Кабинет: заявки на живой тест были видны только как сырой JSON
+    в /api/orders -- теперь есть страница, плюс мини-график динамики
+    на карточке проекта вместо только сегодняшних цифр."""
+
+    def test_desk_page_has_orders_section(self):
+        text = client.get("/desk").text
+        assert "Заявки на" in text and "живой тест" in text
+        assert "/api/orders" in text
+        assert "loadOrders" in text
+
+    def test_desk_page_has_sparkline(self):
+        text = client.get("/desk").text
+        assert 'class="spark"' in text
+        assert "drawSpark" in text and "/api/series/" in text
+
+    def test_desk_renders_chosen_offer_when_present(self):
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [], "best_phrase": "", "verdict": {"level": "unknown", "text": ""},
+                    "competitors": {"found": None, "top": []}}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            rid = client.post("/api/demand", json={"idea": "Идея достаточно длинная для заказа с оффером"}).json().get("id")
+        finally:
+            m.check_demand = orig
+        r = client.post("/api/live-test", json={"check_id": rid, "contact": "@offer_owner_view",
+                        "chosen_offer": {"angle": "a", "h1": "Заголовок для владельца", "sub": "s"}})
+        assert r.status_code == 200
+        orders = client.get("/api/orders", headers=OWNER).json()["orders"]
+        mine = next(o for o in orders if o["contact"] == "@offer_owner_view")
+        assert mine["chosen_offer"]["h1"] == "Заголовок для владельца"
+
+
 class TestProjectPages:
     def test_project_page_renders(self):
         client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
@@ -532,6 +567,7 @@ class TestMorningPass:
 
 from app.demand import (  # noqa: E402
     DemandError, check_demand, generate_formulations, _parse_search_xml, _verdict,
+    wordstat_count, diagnose,
 )
 
 
@@ -607,7 +643,7 @@ class TestDemand:
         """Роут /api/demand не требует owner-ключа (вход воронки)."""
         import app.main as m
         async def fake_check(idea):
-            return {"formulations": [], "best_phrase": "", 
+            return {"formulations": [], "best_phrase": "",
                     "verdict": {"level": "unknown", "text": ""},
                     "competitors": {"found": None, "top": []}}
         orig = m.check_demand
@@ -617,6 +653,78 @@ class TestDemand:
             assert r.status_code == 200 and r.json()["ok"] is True
         finally:
             m.check_demand = orig
+
+
+class TestWordstatDualPath:
+    """Два независимых источника частотности: официальный Wordstat API
+    (Bearer OAuth) и прежний прокси внутри Cloud Search API."""
+
+    def test_without_oauth_token_only_cloud_path_is_tried(self, monkeypatch):
+        """Без YANDEX_WORDSTAT_OAUTH_TOKEN oauth-путь не трогает сеть вовсе --
+        существующие тесты/прод без токена ведут себя как раньше."""
+        monkeypatch.delenv("YANDEX_WORDSTAT_OAUTH_TOKEN", raising=False)
+        async def post(provider, payload):
+            assert provider == "wordstat"   # "wordstat_oauth" никогда не вызовется
+            return {"totalCount": 4200}
+        out = asyncio.run(wordstat_count("тест фраза", _post=post))
+        assert out == 4200
+
+    def test_oauth_path_tried_first_when_token_set(self, monkeypatch):
+        monkeypatch.setenv("YANDEX_WORDSTAT_OAUTH_TOKEN", "test-oauth-token")
+        async def post(provider, payload):
+            if provider == "wordstat_oauth":
+                return {"totalCount": 9000}
+            raise AssertionError("cloud path не должен вызываться, если oauth уже дал ответ")
+        out = asyncio.run(wordstat_count("тест фраза", _post=post))
+        assert out == 9000
+
+    def test_oauth_path_falls_back_to_cloud_on_empty_data(self, monkeypatch):
+        monkeypatch.setenv("YANDEX_WORDSTAT_OAUTH_TOKEN", "test-oauth-token")
+        async def post(provider, payload):
+            if provider == "wordstat_oauth":
+                return {}   # oauth ответил, но без totalCount -- пробуем cloud
+            if provider == "wordstat":
+                return {"totalCount": 700}
+            raise AssertionError(f"unexpected provider {provider}")
+        out = asyncio.run(wordstat_count("тест фраза", _post=post))
+        assert out == 700
+
+
+class TestDiagYandex:
+    def test_requires_owner_key(self):
+        r = client.get("/api/diag/yandex")
+        assert r.status_code in (401, 403)
+
+    def test_reports_both_paths(self, monkeypatch):
+        monkeypatch.delenv("YANDEX_WORDSTAT_OAUTH_TOKEN", raising=False)
+        d = asyncio.run(diagnose("тест", _post=lambda provider, payload: _diag_fake(provider)))
+        assert d["env"]["wordstat_oauth_token_set"] is False
+        assert d["wordstat_oauth_api"]["ok"] is False
+        assert "skipped" in d["wordstat_oauth_api"]
+        assert d["wordstat_cloud_api"]["ok"] is True
+
+    def test_endpoint_returns_diagnostic_structure(self, monkeypatch):
+        import app.main as m
+        async def fake_diagnose(phrase):
+            return {"env": {"yandex_api_key_set": True, "yandex_folder_id_set": True,
+                            "wordstat_oauth_token_set": False},
+                    "wordstat_oauth_api": {"ok": False, "skipped": "..."},
+                    "wordstat_cloud_api": {"ok": True, "data": {"totalCount": 10}}}
+        orig = m.diagnose
+        m.diagnose = fake_diagnose
+        try:
+            r = client.get("/api/diag/yandex", headers=OWNER)
+            assert r.status_code == 200
+            d = r.json()
+            assert "wordstat_oauth_api" in d and "wordstat_cloud_api" in d
+        finally:
+            m.diagnose = orig
+
+
+async def _diag_fake(provider):
+    if provider == "wordstat":
+        return {"totalCount": 10}
+    raise AssertionError(f"unexpected provider {provider}")
 
 
 class TestIdeaSuggest:
@@ -736,6 +844,14 @@ class TestOverallAndStats:
         assert 'id="press"' in home and "Мы в медиа" in home
         assert "href=" not in home.split('id="press"')[1].split("</section>")[0]  # пресса пока без ссылок
 
+    def test_homepage_has_single_social_proof_number(self):
+        """Одна честная живая цифра вместо пустоты — не выдуманный счётчик,
+        подтягивается из /api/stats и не показывается при малых значениях."""
+        home = client.get("/").text
+        assert 'id="social-proof"' in home
+        assert "/api/stats" in home
+        assert "ideas_checked >= 10" in home
+
 
 class TestResultPageAndOrders:
     def _make_check(self):
@@ -760,10 +876,31 @@ class TestResultPageAndOrders:
         assert rid is not None
         page = client.get(f"/r/{rid}")
         assert page.status_code == 200
-        assert "Ступень 1 · Спрос" in page.text and "Ступень 2" in page.text  # преемственность
+        assert "Этап 2 из 8" in page.text and "Этап 3" in page.text  # преемственность, без жаргона
+        assert "Ступень" not in page.text
+        assert "без ям" not in page.text
         assert "тест фраза" in page.text          # результат вшит в страницу
         assert "Путь от идеи до денег" not in page.text   # витрины здесь нет
         assert client.get("/r/999999").status_code == 404
+
+    def test_result_page_handles_null_demand_score_gracefully(self):
+        """Прочерк из 10 баллов -- явный текст вместо голого тире, когда Вордстат недоступен."""
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "тест", "count": None}],
+                    "best_phrase": "тест", "verdict": {"level": "unknown", "text": ""},
+                    "competitors": {"found": None, "top": []},
+                    "scores": [{"key": "demand", "label": "Спрос", "value": None, "note": ""}],
+                    "overall": None}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            rid = client.post("/api/demand", json={"idea": "Идея без данных Вордстата для теста прочерка"}).json()["id"]
+        finally:
+            m.check_demand = orig
+        text = client.get(f"/r/{rid}").text
+        assert '"value": null' in text            # балл «Спрос» действительно null в вшитых данных
+        assert "score-val na" in text              # шаблон умеет показать текст, а не голый дефис
 
     def test_live_test_order_without_payments_is_request(self):
         """Ключи ЮКассы не заданы -> заказ сохраняется как заявка, не ошибка."""
@@ -775,6 +912,16 @@ class TestResultPageAndOrders:
         r2 = client.post("/api/live-test", json={"check_id": rid, "contact": "x"})
         assert r2.status_code == 400   # контакт слишком короткий
 
+    def test_live_test_order_stores_chosen_offer(self):
+        """Выбранный на /r/{id} вариант позиционирования уходит владельцу в /api/orders."""
+        rid = self._make_check()
+        offer = {"angle": "для новичков", "h1": "Быстрый старт", "sub": "Проще, чем кажется"}
+        r = client.post("/api/live-test", json={"check_id": rid, "contact": "@chosen_test", "chosen_offer": offer})
+        assert r.status_code == 200
+        orders = client.get("/api/orders", headers=OWNER).json()["orders"]
+        mine = next(o for o in orders if o["contact"] == "@chosen_test")
+        assert mine["chosen_offer"] == offer
+
     def test_orders_visible_to_owner_only(self):
         r = client.get("/api/orders")
         assert r.status_code in (401, 403)
@@ -782,6 +929,58 @@ class TestResultPageAndOrders:
         assert r.status_code == 200
         orders = r.json()["orders"]
         assert any(o["contact"] == "@boris_test" and o["status"] == "new" for o in orders)
+        assert any(o["chosen_offer"] is None for o in orders)  # заказ без выбора оффера — поле пустое, не падает
+
+
+class TestResultFunnel:
+    """Лента с прогрессивным раскрытием: один фокус на экране вместо полотна."""
+
+    def _make_check(self, **overrides):
+        import app.main as m
+        base = {"formulations": [{"phrase": "тест фраза", "count": 4200}],
+                "best_phrase": "тест фраза",
+                "verdict": {"level": "strong", "text": "Спрос есть"},
+                "competitors": {"found": 100, "top": [{"title": "Т", "domain": "t.ru"}]},
+                "scores": [{"key": "demand", "label": "Спрос", "value": 8, "note": ""}],
+                "overall": {"value": 8, "weakest": "Спрос"}}
+        base.update(overrides)
+        async def fake_check(idea):
+            return base
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            r = client.post("/api/demand", json={"idea": "Идея достаточно длинная для теста ленты"})
+            return r.json()["id"]
+        finally:
+            m.check_demand = orig
+
+    def test_steps_present_in_order(self):
+        text = client.get(f"/r/{self._make_check()}").text
+        positions = [text.index(f'data-step="{n}"') for n in (1, 2, 3, 4, 5)]
+        assert positions == sorted(positions)          # шаги идут по порядку в разметке
+
+    def test_only_first_step_active_on_load(self):
+        text = client.get(f"/r/{self._make_check()}").text
+        assert 'openStep(STEP_ORDER[0])' in text
+        assert 'function advance(' in text and 'function reopen(' in text
+
+    def test_score_detail_hidden_behind_toggle(self):
+        """Разбор по 4 шкалам не должен идти полотном -- прячется за
+        «Почему такая оценка?» и раскрывается по клику."""
+        text = client.get(f"/r/{self._make_check()}").text
+        assert 'id="scores" hidden' in text
+        assert "Почему такая оценка?" in text
+        assert "score-detail-toggle" in text
+
+    def test_skip_link_present_for_sharpen_step(self):
+        text = client.get(f"/r/{self._make_check()}").text
+        assert "Пропустить" in text and "skipSharpen" in text
+
+    def test_steps_without_data_excluded_from_order(self):
+        """Пустые scores/competitors не рисуют шаг вовсе -- STEP_ORDER их не включает."""
+        text = client.get(f"/r/{self._make_check(scores=[], overall=None, competitors={'found': None, 'top': []})}").text
+        assert "hasScores ? 2 : null" in text            # логика исключения шага в разметке присутствует
+        assert "hasComp ? 3 : null" in text
 
 
 class TestPayments:
@@ -823,6 +1022,70 @@ class TestPayments:
                         json={"event": "payment.succeeded", "object": {"id": "fake"}})
         assert r.status_code == 200   # молча принимаем, ничего не меняем
 
+    def test_notify_alias_matches_configured_yookassa_url(self, monkeypatch):
+        """В кабинете ЮКассы указан /api/yookassa/notify -- должен работать так же, как /webhook."""
+        import app.main as m
+        from app.main import LiveTestOrder, Session, engine
+        with Session(engine) as s:
+            order = LiveTestOrder(idea="и", contact="@c2", status="pending_payment",
+                                  payment_id="pay_notify", amount=1490)
+            s.add(order); s.commit(); s.refresh(order); oid = order.id
+        async def fake_fetch(pid, **kw):
+            return {"status": "succeeded", "metadata": {"order_id": str(oid)}}
+        monkeypatch.setattr(m.payments, "fetch_payment", fake_fetch)
+        r = client.post("/api/yookassa/notify",
+                        json={"event": "payment.succeeded", "object": {"id": "pay_notify"}})
+        assert r.status_code == 200
+        with Session(engine) as s:
+            assert s.get(LiveTestOrder, oid).status == "paid"
+
+
+class TestSharpenPublic:
+    """Заострение идеи -- бесплатно и без ключа владельца, по кнопке на /r/{id}."""
+
+    def test_sharpen_public_no_owner_key_required(self):
+        import app.main as m
+        async def fake_sharpen(idea):
+            return {"sharpened_note": "сместил акценты", "warning": "",
+                    "offers": [dict(VALID_OFFER, idea_id=f"pub{i}") for i in range(3)]}
+        orig = m.sharpen_idea
+        m.sharpen_idea = fake_sharpen
+        try:
+            r = client.post("/api/sharpen", json={"idea": "Идея достаточно длинная для заострения"})
+            assert r.status_code == 200
+            d = r.json()
+            assert d["ok"] is True and len(d["offers"]) == 3
+        finally:
+            m.sharpen_idea = orig
+
+    def test_sharpen_llm_failure_returns_400(self):
+        import app.main as m
+        async def failing(idea):
+            raise OfferEngineError("ИИ думал слишком долго. Подождите минуту и попробуйте ещё раз.")
+        orig = m.sharpen_idea
+        m.sharpen_idea = failing
+        try:
+            r = client.post("/api/sharpen", json={"idea": "Идея достаточно длинная для сбоя"})
+            assert r.status_code == 400 and r.json()["ok"] is False
+        finally:
+            m.sharpen_idea = orig
+
+    def test_sharpen_shown_on_result_page(self):
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "а", "count": 1}], "best_phrase": "а",
+                    "verdict": {"level": "weak", "text": ""}, "competitors": {"found": None, "top": []},
+                    "scores": [], "overall": None}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            rid = client.post("/api/demand", json={"idea": "Идея достаточно длинная для страницы заострения"}).json()["id"]
+        finally:
+            m.check_demand = orig
+        text = client.get(f"/r/{rid}").text
+        assert "/api/sharpen" in text
+        assert "Заострим идею" in text
+
 
 class TestGuideDirect:
     def test_guide_page_serves(self):
@@ -832,7 +1095,9 @@ class TestGuideDirect:
         assert "Простой старт" in t and "нельзя выключить первые 30 дней" in t
         assert "режим эксперта" in t.lower()
         assert "только Поиск" in t
-        assert "Ступень 3" in t
+        assert "Этап 4 из 8" in t
+        assert "Ступень" not in t
+        assert "без ям" not in t
         assert "оффер" not in t.lower() and "лендинг" not in t.lower()
 
     def test_result_page_links_to_guide(self):
@@ -931,3 +1196,17 @@ class TestFooterLinks:
 
     def test_guide_direct_has_footer(self):
         self._assert_footer(client.get("/guide/direct").text, "гайда по Директу")
+
+
+class TestProjectPage:
+    """Страница /p/ переведена со старого тёмного «чертёжного» стиля на
+    светлую дизайн-систему проекта."""
+
+    def test_project_page_uses_light_design_system(self):
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="light_proj_v1", product_name="СветлыйПроект")})
+        text = client.get("/p/light_proj_v1").text
+        assert text.count("Этап") >= 1
+        assert "Manrope" not in text and "Onest" not in text and "JetBrains Mono" not in text
+        assert "IBM Plex" in text
+        assert "#FBF6EA" in text   # фон бумаги, а не --blueprint

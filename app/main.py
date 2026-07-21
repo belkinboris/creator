@@ -53,7 +53,7 @@ else:
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 from app.offer_engine import OfferEngineError, sharpen_idea  # noqa: E402
-from app.demand import DemandError, check_demand, generate_idea  # noqa: E402
+from app.demand import DemandError, check_demand, generate_idea, diagnose  # noqa: E402
 from app import payments  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -110,7 +110,7 @@ class DemandCheck(SQLModel, table=True):
 
 
 class LiveTestOrder(SQLModel, table=True):
-    """Заказ ступени 2 «живой тест». Статусы: new (заявка без оплаты),
+    """Заказ этапа 2 «живой тест». Статусы: new (заявка без оплаты),
     pending_payment, paid."""
     id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -120,6 +120,7 @@ class LiveTestOrder(SQLModel, table=True):
     status: str = "new"
     payment_id: str = ""
     amount: int = 0
+    chosen_offer: str = ""    # JSON: вариант позиционирования, выбранный на /r/{id}
 
 
 class SmokeEvent(SQLModel, table=True):
@@ -139,6 +140,7 @@ try:  # create_all не добавляет колонки в существую�
     from sqlalchemy import text as _sqltext
     with engine.connect() as _c:
         _c.execute(_sqltext("ALTER TABLE demandcheck ADD COLUMN IF NOT EXISTS result_json VARCHAR DEFAULT ''"))
+        _c.execute(_sqltext("ALTER TABLE livetestorder ADD COLUMN IF NOT EXISTS chosen_offer VARCHAR DEFAULT ''"))
         _c.commit()
 except Exception:  # sqlite в тестах создаёт таблицу сразу с колонкой -- это норма
     pass
@@ -219,6 +221,21 @@ async def demand_check(data: IdeaIn, request: Request):
     return {"ok": True, "id": check_id, **result}
 
 
+@app.post("/api/sharpen")
+async def sharpen(data: IdeaIn, request: Request):
+    """Бесплатное заострение идеи в 3 варианта позиционирования — по кнопке
+    на странице результата, не на каждый визит (LLM-вызов тяжёлый и долгий)."""
+    client_ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else "?")
+    if _rate_limited(client_ip):
+        raise HTTPException(429, "слишком часто")
+    try:
+        result = await sharpen_idea(data.idea)
+        return {"ok": True, **result}
+    except OfferEngineError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
 LIVE_TEST_PRICE = int(os.environ.get("SOZDATEL_LIVE_TEST_PRICE", "1490"))
 
 
@@ -232,11 +249,13 @@ def result_page(rid: int):
         return HTMLResponse(_static("index.html"), status_code=404)
     tpl = _static("result.html")
     safe_json = rec.result_json.replace("</", "<\\/")
+    idea_json = json.dumps(rec.idea, ensure_ascii=False).replace("</", "<\\/")
     html_out = (tpl
         .replace("__CHECK_ID__", str(rec.id))
         .replace("__PRICE__", str(LIVE_TEST_PRICE))
         .replace("__PAY_ENABLED__", "true" if payments.configured() else "false")
         .replace("__IDEA__", html.escape(rec.idea))
+        .replace("__IDEA_JSON__", idea_json)
         .replace("__RESULT_JSON__", safe_json))
     return HTMLResponse(html_out)
 
@@ -244,22 +263,24 @@ def result_page(rid: int):
 class LiveTestIn(SQLModel):
     check_id: Optional[int] = None
     contact: str = ""
+    chosen_offer: Optional[dict] = None
 
 
 @app.post("/api/live-test")
 async def live_test_order(data: LiveTestIn, request: Request):
-    """Заказ ступени 2. С настроенной кассой -> ссылка на оплату;
+    """Заказ этапа 2. С настроенной кассой -> ссылка на оплату;
     без ключей ЮКассы -> заявка (свяжемся вручную)."""
     contact = (data.contact or "").strip()
     if len(contact) < 5:
         return JSONResponse({"ok": False, "error": "Оставьте телеграм или почту — чтобы нам было куда вернуться с результатом."}, status_code=400)
     idea = ""
+    chosen_offer_json = json.dumps(data.chosen_offer, ensure_ascii=False)[:2000] if data.chosen_offer else ""
     with Session(engine) as s:
         if data.check_id:
             rec = s.get(DemandCheck, data.check_id)
             idea = rec.idea if rec else ""
         order = LiveTestOrder(check_id=data.check_id, idea=idea, contact=contact[:200],
-                              amount=LIVE_TEST_PRICE,
+                              amount=LIVE_TEST_PRICE, chosen_offer=chosen_offer_json,
                               status="pending_payment" if payments.configured() else "new")
         s.add(order); s.commit(); s.refresh(order)
         order_id = order.id
@@ -279,6 +300,7 @@ async def live_test_order(data: LiveTestIn, request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
 
 
+@app.post("/api/yookassa/notify")
 @app.post("/api/yookassa/webhook")
 async def yookassa_webhook(request: Request):
     """Телу вебхука не верим: перепроверяем платёж напрямую у ЮКассы."""
@@ -309,7 +331,8 @@ def orders_list(request: Request):
     with Session(engine) as s:
         rows = s.exec(select(LiveTestOrder)).all()
     return {"orders": [{"id": o.id, "created_at": str(o.created_at), "idea": o.idea,
-                        "contact": o.contact, "status": o.status, "amount": o.amount}
+                        "contact": o.contact, "status": o.status, "amount": o.amount,
+                        "chosen_offer": json.loads(o.chosen_offer) if o.chosen_offer else None}
                        for o in reversed(rows)]}
 
 
@@ -320,6 +343,16 @@ def public_stats():
         ideas = len(s.exec(select(DemandCheck)).all())
         events = len(s.exec(select(SmokeEvent)).all())
     return {"ideas_checked": ideas, "events": events}
+
+
+@app.get("/api/diag/yandex")
+async def diag_yandex(request: Request, phrase: str = "купить слона"):
+    """Owner-only: сырая диагностика интеграции с Яндексом -- оба пути
+    Вордстата (официальный OAuth API и прокси внутри Cloud Search API),
+    без глотания ошибок. Открыть в браузере с ?key=... при жалобе
+    «нет данных», чтобы увидеть точную причину, а не гадать."""
+    _check_owner(request)
+    return await diagnose(phrase)
 
 
 # ---------------------------------------------------------------------------
@@ -783,7 +816,7 @@ def legal_page():
 
 @app.get("/guide/direct", response_class=HTMLResponse)
 def guide_direct():
-    """Ступень 3: пошаговый запуск Директа без ям (режим эксперта, только Поиск)."""
+    """Этап 4 из 8 — пошаговый запуск Директа (режим эксперта, только Поиск)."""
     return HTMLResponse(_static("guide-direct.html"))
 
 
