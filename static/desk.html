@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Кабинет — Создатель</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2712%27 fill=%27%23FFDE59%27/%3E%3Ctext x=%2732%27 y=%2744%27 font-family=%27Arial,sans-serif%27 font-size=%2736%27 font-weight=%27700%27 text-anchor=%27middle%27 fill=%27%231B1C20%27%3EС%3C/text%3E%3C/svg%3E">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
   /* Та же система, что на главной: бумага, чернила, жёлтый маркер. */
@@ -68,6 +69,9 @@
     border:1px solid var(--ink);border-radius:8px;padding:18px;max-width:520px}
   #form h3{font-size:16px;font-weight:600;margin-bottom:4px}
   #form .row{display:flex;gap:8px;margin-top:12px}
+  footer{border-top:1px solid var(--line);margin-top:30px;padding:22px 0;color:var(--muted);font-size:13px}
+  footer a{color:var(--muted)}
+  footer a:hover{color:var(--ink)}
 </style>
 </head>
 <body>
@@ -104,7 +108,7 @@
 
 <script>
 let KEY = sessionStorage.getItem("sozdatel_key") || "";
-const STAGES = ["Формулировка","Спрос","Активация","Первая ценность","Мост к деньгам","Оплата","Масштаб","Удержание"];
+const STAGES = ["Идея","Спрос","Проверочная страница","Реклама","Заявки","Первые продажи","Повторяемость","Удержание"];
 function strip(a){ return [0,1,2,3,4,5,6,7].map(i=> i===a? `<b>[${i}]</b>`:i).join(" "); }
 function enter(){
   KEY = document.getElementById("key").value.trim();
@@ -233,5 +237,11 @@ async function addTracked(){
 }
 if(KEY) load();
 </script>
+
+<footer>
+  <div class="wrap" style="padding-top:0;padding-bottom:0">
+    <span>© Создатель</span> · <a href="/oferta">Публичная оферта</a> · <a href="/agreement">Соглашение</a> · <a href="/privacy">Конфиденциальность</a> · <a href="/contacts">Реквизиты</a>
+  </div>
+</footer>
 </body>
 </html>
