@@ -689,10 +689,12 @@ class TestScores:
         assert [s["key"] for s in out["scores"]] == ["demand"]
         assert out["scores"][0]["value"] == 4   # 700/мес -> диапазон 300..1000
 
-    def test_homepage_renders_score_block(self):
+    def test_result_page_renders_score_block(self):
+        """v2.5: результат живёт на /r/<id> -- главная больше не смешивает
+        витрину и инструмент."""
         home = client.get("/").text
-        assert 'id="score-card"' in home and "Оценка идеи" in home
-        assert "инструкцией безопаснее" not in home   # блок ушёл в плейбук этапа 4
+        assert 'id="score-card"' not in home           # инлайн-результата нет
+        assert "инструкцией безопаснее" not in home    # блок ушёл в плейбук этапа 4
 
 
 class TestOverallAndStats:
@@ -728,9 +730,95 @@ class TestOverallAndStats:
         finally:
             m.check_demand = orig
 
-    def test_homepage_overall_and_live_counter(self):
+    def test_homepage_declutter_v25(self):
         home = client.get("/").text
-        assert 'id="overall"' in home and "/api/stats" in home
-        assert "порог конверсии живой идеи" not in home   # голая метрика из статистики убрана
-        assert 'id="stat-ideas"' in home                  # вместо неё живой счётчик
-        assert 'id="press"' in home         # блок прессы готов, ждёт URL
+        assert "стоит проверка спроса" not in home   # блок цифр снят с витрины
+        assert 'id="press"' in home and "Мы в медиа" in home
+        assert "href=" not in home.split('id="press"')[1].split("</section>")[0]  # пресса пока без ссылок
+
+
+class TestResultPageAndOrders:
+    def _make_check(self):
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "тест фраза", "count": 4200}],
+                    "best_phrase": "тест фраза",
+                    "verdict": {"level": "strong", "text": "Спрос есть"},
+                    "competitors": {"found": 100, "top": [{"title": "Т", "domain": "t.ru"}]},
+                    "scores": [{"key": "demand", "label": "Спрос", "value": 8, "note": ""}],
+                    "overall": {"value": 8, "weakest": "Спрос"}}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            r = client.post("/api/demand", json={"idea": "Достаточно длинная идея для страницы результата"})
+            return r.json()["id"]
+        finally:
+            m.check_demand = orig
+
+    def test_demand_returns_id_and_result_page_works(self):
+        rid = self._make_check()
+        assert rid is not None
+        page = client.get(f"/r/{rid}")
+        assert page.status_code == 200
+        assert "Ступень 1 · Спрос" in page.text and "Ступень 2" in page.text  # преемственность
+        assert "тест фраза" in page.text          # результат вшит в страницу
+        assert "Путь от идеи до денег" not in page.text   # витрины здесь нет
+        assert client.get("/r/999999").status_code == 404
+
+    def test_live_test_order_without_payments_is_request(self):
+        """Ключи ЮКассы не заданы -> заказ сохраняется как заявка, не ошибка."""
+        rid = self._make_check()
+        r = client.post("/api/live-test", json={"check_id": rid, "contact": "@boris_test"})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["ok"] is True and d["paid"] is False and "Заявка принята" in d["message"]
+        r2 = client.post("/api/live-test", json={"check_id": rid, "contact": "x"})
+        assert r2.status_code == 400   # контакт слишком короткий
+
+    def test_orders_visible_to_owner_only(self):
+        r = client.get("/api/orders")
+        assert r.status_code in (401, 403)
+        r = client.get("/api/orders", headers=OWNER)
+        assert r.status_code == 200
+        orders = r.json()["orders"]
+        assert any(o["contact"] == "@boris_test" and o["status"] == "new" for o in orders)
+
+
+class TestPayments:
+    def test_create_payment_via_injection(self):
+        from app.payments import create_payment
+        captured = {}
+        async def post(kind, payload):
+            assert kind == "create"
+            captured.update(payload)
+            return {"id": "pay_123", "confirmation": {"confirmation_url": "https://yookassa.example/pay"}}
+        pid, url = asyncio.run(create_payment(7, 1490, "Создатель · живой тест", "https://x/r/1?paid=1", _post=post))
+        assert pid == "pay_123" and url.startswith("https://")
+        assert captured["amount"]["value"] == "1490.00"
+        assert captured["metadata"]["order_id"] == "7"
+
+    def test_webhook_marks_order_paid_only_after_verification(self, monkeypatch):
+        import app.main as m
+        from app.main import LiveTestOrder, Session, engine
+        with Session(engine) as s:
+            order = LiveTestOrder(idea="и", contact="@c", status="pending_payment",
+                                  payment_id="pay_x", amount=1490)
+            s.add(order); s.commit(); s.refresh(order); oid = order.id
+        async def fake_fetch(pid, **kw):
+            assert pid == "pay_x"
+            return {"status": "succeeded", "metadata": {"order_id": str(oid)}}
+        monkeypatch.setattr(m.payments, "fetch_payment", fake_fetch)
+        r = client.post("/api/yookassa/webhook",
+                        json={"event": "payment.succeeded", "object": {"id": "pay_x"}})
+        assert r.status_code == 200
+        with Session(engine) as s:
+            assert s.get(LiveTestOrder, oid).status == "paid"
+
+    def test_webhook_ignores_unverified(self, monkeypatch):
+        import app.main as m
+        async def fake_fetch(pid, **kw):
+            return {}   # ЮКасса не подтвердила -- телу вебхука не верим
+        monkeypatch.setattr(m.payments, "fetch_payment", fake_fetch)
+        r = client.post("/api/yookassa/webhook",
+                        json={"event": "payment.succeeded", "object": {"id": "fake"}})
+        assert r.status_code == 200   # молча принимаем, ничего не меняем

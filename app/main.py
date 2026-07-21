@@ -20,6 +20,7 @@ ANTHROPIC_API_KEY), DATABASE_URL (по умолчанию sqlite).
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -53,6 +54,7 @@ engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 from app.offer_engine import OfferEngineError, sharpen_idea  # noqa: E402
 from app.demand import DemandError, check_demand, generate_idea  # noqa: E402
+from app import payments  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sozdatel")
@@ -98,11 +100,25 @@ class TrackedProject(SQLModel, table=True):
 
 
 class DemandCheck(SQLModel, table=True):
-    """Каждая бесплатная проверка спроса -- для живого счётчика на главной."""
+    """Каждая бесплатная проверка спроса: счётчик + страница результата /r/<id>."""
     id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     idea: str = ""
     best_count: Optional[int] = None
+    result_json: str = ""
+
+
+class LiveTestOrder(SQLModel, table=True):
+    """Заказ ступени 2 «живой тест». Статусы: new (заявка без оплаты),
+    pending_payment, paid."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    check_id: Optional[int] = None
+    idea: str = ""
+    contact: str = ""
+    status: str = "new"
+    payment_id: str = ""
+    amount: int = 0
 
 
 class SmokeEvent(SQLModel, table=True):
@@ -118,6 +134,13 @@ class SmokeEvent(SQLModel, table=True):
 
 
 SQLModel.metadata.create_all(engine)
+try:  # create_all не добавляет колонки в существующие таблицы -- добиваем вручную
+    from sqlalchemy import text as _sqltext
+    with engine.connect() as _c:
+        _c.execute(_sqltext("ALTER TABLE demandcheck ADD COLUMN IF NOT EXISTS result_json VARCHAR DEFAULT ''"))
+        _c.commit()
+except Exception:  # sqlite в тестах создаёт таблицу сразу с колонкой -- это норма
+    pass
 
 app = FastAPI(title="Создатель", version="1.0.2")
 
@@ -182,14 +205,111 @@ async def demand_check(data: IdeaIn, request: Request):
         result = await check_demand(data.idea)
     except DemandError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-    try:  # счётчик не должен уметь ломать ответ пользователю
+    check_id = None
+    try:  # сохранение не должно уметь ломать ответ пользователю
         known = [f["count"] for f in result["formulations"] if f["count"] is not None]
+        rec = DemandCheck(idea=data.idea[:300], best_count=max(known) if known else None,
+                          result_json=json.dumps(result, ensure_ascii=False))
         with Session(engine) as s:
-            s.add(DemandCheck(idea=data.idea[:300], best_count=max(known) if known else None))
-            s.commit()
+            s.add(rec); s.commit(); s.refresh(rec)
+            check_id = rec.id
     except Exception:
         logging.getLogger(__name__).warning("demand check not persisted", exc_info=True)
-    return {"ok": True, **result}
+    return {"ok": True, "id": check_id, **result}
+
+
+LIVE_TEST_PRICE = int(os.environ.get("SOZDATEL_LIVE_TEST_PRICE", "1490"))
+
+
+@app.get("/r/{rid}", response_class=HTMLResponse)
+def result_page(rid: int):
+    """Страница результата проверки: инструмент, а не витрина. Узкая полоска
+    преемственности вместо всего пути 0->7; отсюда же -- заказ живого теста."""
+    with Session(engine) as s:
+        rec = s.get(DemandCheck, rid)
+    if not rec or not rec.result_json:
+        return HTMLResponse(_static("index.html"), status_code=404)
+    tpl = _static("result.html")
+    safe_json = rec.result_json.replace("</", "<\\/")
+    html_out = (tpl
+        .replace("__CHECK_ID__", str(rec.id))
+        .replace("__PRICE__", str(LIVE_TEST_PRICE))
+        .replace("__PAY_ENABLED__", "true" if payments.configured() else "false")
+        .replace("__IDEA__", html.escape(rec.idea))
+        .replace("__RESULT_JSON__", safe_json))
+    return HTMLResponse(html_out)
+
+
+class LiveTestIn(SQLModel):
+    check_id: Optional[int] = None
+    contact: str = ""
+
+
+@app.post("/api/live-test")
+async def live_test_order(data: LiveTestIn, request: Request):
+    """Заказ ступени 2. С настроенной кассой -> ссылка на оплату;
+    без ключей ЮКассы -> заявка (свяжемся вручную)."""
+    contact = (data.contact or "").strip()
+    if len(contact) < 5:
+        return JSONResponse({"ok": False, "error": "Оставьте телеграм или почту — чтобы нам было куда вернуться с результатом."}, status_code=400)
+    idea = ""
+    with Session(engine) as s:
+        if data.check_id:
+            rec = s.get(DemandCheck, data.check_id)
+            idea = rec.idea if rec else ""
+        order = LiveTestOrder(check_id=data.check_id, idea=idea, contact=contact[:200],
+                              amount=LIVE_TEST_PRICE,
+                              status="pending_payment" if payments.configured() else "new")
+        s.add(order); s.commit(); s.refresh(order)
+        order_id = order.id
+    if not payments.configured():
+        return {"ok": True, "paid": False,
+                "message": "Заявка принята. Мы свяжемся в течение дня, запустим страницу и рекламу вашей идеи."}
+    try:
+        base = str(request.base_url).rstrip("/")
+        pid, url = await payments.create_payment(
+            order_id, LIVE_TEST_PRICE, f"Создатель · живой тест идеи (заказ {order_id})",
+            f"{base}/r/{data.check_id or ''}?paid=1")
+        with Session(engine) as s:
+            order = s.get(LiveTestOrder, order_id)
+            order.payment_id = pid; s.add(order); s.commit()
+        return {"ok": True, "paid": True, "confirmation_url": url}
+    except payments.PaymentsError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+
+
+@app.post("/api/yookassa/webhook")
+async def yookassa_webhook(request: Request):
+    """Телу вебхука не верим: перепроверяем платёж напрямую у ЮКассы."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": True}
+    pid = ((body.get("object") or {}).get("id")) or ""
+    if not pid:
+        return {"ok": True}
+    payment = await payments.fetch_payment(pid)
+    if payment.get("status") != "succeeded":
+        return {"ok": True}
+    order_id = (payment.get("metadata") or {}).get("order_id")
+    try:
+        with Session(engine) as s:
+            order = s.get(LiveTestOrder, int(order_id)) if order_id else None
+            if order and order.status != "paid":
+                order.status = "paid"; s.add(order); s.commit()
+    except Exception:
+        logging.getLogger(__name__).warning("webhook order update failed", exc_info=True)
+    return {"ok": True}
+
+
+@app.get("/api/orders")
+def orders_list(request: Request):
+    _check_owner(request)
+    with Session(engine) as s:
+        rows = s.exec(select(LiveTestOrder)).all()
+    return {"orders": [{"id": o.id, "created_at": str(o.created_at), "idea": o.idea,
+                        "contact": o.contact, "status": o.status, "amount": o.amount}
+                       for o in reversed(rows)]}
 
 
 @app.get("/api/stats")

@@ -30,6 +30,12 @@
    - `YANDEX_API_KEY`, `YANDEX_FOLDER_ID` — отдельная папка Yandex AI
      Studio под Создателя (не общая с АвтоПостом)
    - `SOZDATEL_OWNER_KEY` — перенести значение как есть с Railway
+   - Оплата живого теста (ЮКасса): `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`;
+     цена — `SOZDATEL_LIVE_TEST_PRICE` (по умолчанию 1490, в рублях).
+     Пока ключи не заданы, кнопка на /r/<id> работает как «Оставить заявку» —
+     заказы копятся в БД, смотреть: GET /api/orders с X-Owner-Key.
+     В личном кабинете ЮКассы указать URL вебхука:
+     https://projectsozdatel.ru/api/yookassa/webhook (событие payment.succeeded).
    - `ANTHROPIC_API_KEY` — не обязателен, нужен только для отката на
      `LLM_PROVIDER=anthropic`
    - Проверка спроса (частотности Вордстата + конкуренты) использует

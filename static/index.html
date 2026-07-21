@@ -161,30 +161,6 @@
       <p class="err" id="err" role="alert"></p>
     </div>
 
-    <div class="result" id="result" aria-live="polite">
-      <div class="res-block">
-        <div class="res-title">Сколько ищут в Яндексе · Россия · в месяц</div>
-        <div id="freqs"></div>
-        <div id="verdict-wrap"></div>
-      </div>
-      <div class="res-block" id="score-card" style="display:none">
-        <div class="res-title">Оценка идеи</div>
-        <div class="overall" id="overall" style="display:none">
-          <span class="overall-val" id="overall-val"></span>
-          <span class="overall-note" id="overall-note"></span>
-        </div>
-        <div class="score-grid" id="scores"></div>
-      </div>
-      <div class="res-block" id="comp-card" style="display:none">
-        <div class="res-title">Кто уже отвечает на этот спрос</div>
-        <div id="comps"></div>
-      </div>
-      <div class="next">
-        <h3>Спрос — это интерес. Проверим <span class="hl">готовность платить</span>?</h3>
-        <p>Поиск показывает, что люди ищут. Следующая ступень — узнать, оставят ли они заявку: соберём проверочную страницу под вашу идею, запустим рекламу в Яндексе по инструкции и посчитаем живые заявки.</p>
-        <a class="btn" href="/desk">Запустить проверку на живых людях</a>
-      </div>
-    </div>
   </section>
 
   <section class="band wrap" id="path">
@@ -201,23 +177,10 @@
       <div class="step"><span class="n">8</span><div><h3>Удержание</h3><p>Клиенты возвращаются и рекомендуют. Здесь идея становится бизнесом.</p></div></div>
     </div>
   </section>
-  <section class="band wrap">
-    <div class="stats">
-      <div class="stat"><b>0 ₽</b><span>стоит проверка спроса</span></div>
-      <div class="stat"><b>2 мин</b><span>от идеи до цифр Яндекса</span></div>
-      <div class="stat"><b>8</b><span>ступеней от идеи до денег</span></div>
-      <div class="stat" id="stat-ideas" style="display:none"><b id="stat-ideas-n"></b><span>идей уже проверено здесь</span></div>
-    </div>
+  <section class="band wrap" id="press">
+    <p class="band-sub" style="margin-bottom:6px">Мы в медиа</p>
+    <p style="color:var(--muted);font-size:15px">О Создателе выходили материалы на vc.ru и в Дзене — ссылки добавим после обновления публикаций.</p>
   </section>
-
-  <section class="band wrap" id="press" hidden>
-    <p class="band-sub" style="margin-bottom:10px">Мы в медиа</p>
-    <p class="press-links">
-      <a href="URL_VC" rel="noopener">Статья о Создателе на vc.ru</a> ·
-      <a href="URL_DZEN" rel="noopener">Разбор в Дзене</a>
-    </p>
-  </section>
-  <!-- press: подставить настоящие URL вместо URL_VC / URL_DZEN и убрать hidden -->
 </main>
 
 <footer>
@@ -231,7 +194,6 @@ const btn = document.getElementById('check-btn');
 const ideaBtn = document.getElementById('idea-btn');
 const ideaEl = document.getElementById('idea');
 const errEl = document.getElementById('err');
-const resEl = document.getElementById('result');
 
 function fmt(n){ return n.toLocaleString('ru-RU'); }
 function showErr(msg){ errEl.textContent = msg; errEl.classList.add('show'); }
@@ -273,52 +235,8 @@ btn.addEventListener('click', async () => {
     });
     const data = await r.json();
     if (!r.ok || !data.ok) throw new Error(data.error || data.detail || 'Сервис сейчас перегружен. Попробуйте через минуту.');
-
-    document.getElementById('freqs').innerHTML = data.formulations.map(f => `
-      <div class="freq-row">
-        <span class="freq-phrase">${escapeHtml(f.phrase)}</span>
-        <span>${f.count === null
-          ? '<span class="freq-num na">нет данных</span>'
-          : `<span class="freq-num">${fmt(f.count)}</span><span class="freq-unit">запросов/мес</span>`}
-        </span>
-      </div>`).join('');
-
-    const v = data.verdict || {};
-    document.getElementById('verdict-wrap').innerHTML =
-      `<div class="verdict ${v.level || 'unknown'}">${escapeHtml(v.text || '')}</div>`;
-
-    const sc = data.scores || [];
-    const scoreCard = document.getElementById('score-card');
-    if (sc.length) {
-      scoreCard.style.display = '';
-      const ov = data.overall;
-      const ovEl = document.getElementById('overall');
-      if (ov && ov.value !== null) {
-        ovEl.style.display = '';
-        document.getElementById('overall-val').textContent = ov.value + '/10';
-        document.getElementById('overall-note').textContent =
-          ov.weakest ? 'Слабое место — ' + ov.weakest.toLowerCase() : '';
-      } else { ovEl.style.display = 'none'; }
-      document.getElementById('scores').innerHTML = sc.map(s => `
-        <div class="score-cell">
-          <div><span class="score-val">${s.value === null ? '—' : escapeHtml(String(s.value))}</span><span class="score-max">/10</span></div>
-          <div class="score-label">${escapeHtml(s.label)}</div>
-          ${s.note ? `<div class="score-note">${escapeHtml(s.note)}</div>` : ''}
-        </div>`).join('');
-    } else { scoreCard.style.display = 'none'; }
-
-    const comp = data.competitors || {};
-    const compCard = document.getElementById('comp-card');
-    if (comp.top && comp.top.length) {
-      compCard.style.display = '';
-      const found = comp.found ? `<div class="fine" style="margin-bottom:8px">В выдаче по запросу «${escapeHtml(data.best_phrase)}» — ${fmt(comp.found)} страниц. Топ сейчас занимают:</div>` : '';
-      document.getElementById('comps').innerHTML = found + comp.top.map(c => `
-        <div class="comp-item"><span class="comp-domain">${escapeHtml(c.domain)}</span><span>${escapeHtml(c.title)}</span></div>`).join('');
-    } else {
-      compCard.style.display = 'none';
-    }
-    resEl.classList.add('show');
-    resEl.scrollIntoView({behavior: 'smooth', block: 'start'});
+    if (data.id) { location.href = '/r/' + data.id; return; }
+    throw new Error('Результат готов, но страница не открылась. Попробуйте ещё раз.');
   } catch (e) {
     showErr(e.message);
   } finally {
@@ -326,17 +244,6 @@ btn.addEventListener('click', async () => {
     btn.textContent = label;
   }
 });
-
-(async () => {  // живой счётчик: показываем, когда есть что показать
-  try {
-    const r = await fetch('/api/stats');
-    const st = await r.json();
-    if (st.ideas_checked >= 10) {
-      document.getElementById('stat-ideas-n').textContent = st.ideas_checked.toLocaleString('ru-RU');
-      document.getElementById('stat-ideas').style.display = '';
-    }
-  } catch (e) { /* счётчик не критичен */ }
-})();
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

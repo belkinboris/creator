@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Результат проверки спроса — Создатель</title>
+<meta name="robots" content="noindex">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#FBF6EA;--box:#FFFDF6;--line:#E9E1CB;--ink:#1B1C20;--muted:#6F6A5C;
+    --marker:#FFDE59;--btn:#1B1C20;--ok:#2E7D4F;--warn:#A87B00;--bad:#B23A3A;--pad:22px}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font:400 16px/1.55 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:760px;margin:0 auto;padding-left:22px;padding-right:22px;
+    padding-left:max(var(--pad), env(safe-area-inset-left));
+    padding-right:max(var(--pad), env(safe-area-inset-right))}
+  a{color:var(--ink)}
+  .hl{background:linear-gradient(transparent 58%, var(--marker) 58%);padding:0 2px}
+  header{border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:baseline;justify-content:space-between;padding:14px 0;flex-wrap:wrap;gap:6px}
+  .logo{font-weight:700;font-size:17px;color:var(--ink);text-decoration:none}
+  .nav a.link{color:var(--muted);text-decoration:none;font-size:14px}
+  .nav a.link:hover{color:var(--ink);text-decoration:underline}
+
+  /* Полоска преемственности: где я на пути и что дальше — вместо всей витрины */
+  .crumbs{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    font:600 13px "IBM Plex Mono",monospace;color:var(--muted);padding:16px 0 0}
+  .crumbs .done{color:var(--ok)}
+  .crumbs .cur{color:var(--ink);background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 3px}
+
+  .head{padding:14px 0 6px}
+  h1{font-size:clamp(21px,3.8vw,27px);font-weight:600;letter-spacing:-.015em}
+  .idea{color:var(--muted);font-size:16px;margin-top:6px;max-width:42em}
+  .share{margin-top:10px}
+  .share button{appearance:none;background:transparent;border:1px solid var(--line);
+    border-radius:6px;padding:8px 14px;font:500 14px "IBM Plex Sans";color:var(--ink);cursor:pointer}
+  .share button:hover{border-color:var(--ink)}
+  .paid-note{display:none;border-left:3px solid var(--ok);padding:2px 0 2px 12px;
+    margin-top:14px;font-size:15px}
+  .paid-note.show{display:block}
+
+  .res-block{border-top:1px solid var(--line);padding:18px 0}
+  .res-title{font-size:13px;font-weight:600;color:var(--muted);margin-bottom:12px}
+  .freq-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:9px 0}
+  .freq-row + .freq-row{border-top:1px solid var(--line)}
+  .freq-num{font:600 18px/1 "IBM Plex Mono",monospace;white-space:nowrap;
+    background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 3px}
+  .freq-num.na{color:var(--muted);font-size:14px;font-weight:500;background:none}
+  .freq-unit{font-size:12px;color:var(--muted);margin-left:5px}
+  .verdict{padding-left:12px;border-left:3px solid var(--line);font-size:16px;margin-top:12px}
+  .verdict.strong{border-color:var(--ok)} .verdict.niche{border-color:var(--warn)}
+  .verdict.weak{border-color:var(--bad)} .verdict.unknown{border-color:var(--line)}
+  .overall{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:2px 0 14px}
+  .overall-val{font:600 40px/1 "IBM Plex Mono",monospace;
+    background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 4px}
+  .overall-note{color:var(--muted);font-size:15px}
+  .score-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .score-cell{background:var(--box);padding:14px 12px}
+  .score-val{font:600 24px/1 "IBM Plex Mono",monospace;display:inline-block;
+    background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 3px}
+  .score-max{font:500 12px "IBM Plex Mono",monospace;color:var(--muted);margin-left:2px}
+  .score-label{font-size:13px;font-weight:600;margin-top:7px}
+  .score-note{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+  .comp-item{display:flex;gap:10px;padding:8px 0;font-size:15px}
+  .comp-item + .comp-item{border-top:1px solid var(--line)}
+  .comp-domain{font:500 13px "IBM Plex Mono",monospace;color:var(--muted);white-space:nowrap;padding-top:2px}
+  .fine{color:var(--muted);font-size:13px}
+
+  /* Ступень 2: заказ живого теста */
+  .next{border:1px solid var(--line);background:var(--box);border-radius:8px;padding:20px;margin:16px 0 40px}
+  .next h3{font-size:18px;font-weight:600;margin-bottom:6px}
+  .next p{color:var(--muted);font-size:15px;margin-bottom:14px;max-width:38em}
+  .next input{width:100%;padding:11px 12px;border:1px solid var(--line);
+    border-radius:6px;background:#fff;color:var(--ink);font:inherit;margin-bottom:10px}
+  .btn{appearance:none;border:0;cursor:pointer;border-radius:6px;display:inline-block;
+    background:var(--btn);color:#fff;font:600 15px "IBM Plex Sans";padding:11px 18px}
+  .btn:hover{background:#000}
+  .btn[disabled]{opacity:.55;cursor:wait}
+  .err{display:none;margin-top:10px;color:var(--bad);font-size:15px}
+  .err.show{display:block}
+  .okmsg{display:none;border-left:3px solid var(--ok);padding:2px 0 2px 12px;margin-top:12px;font-size:15px}
+  .okmsg.show{display:block}
+  @media (max-width:560px){
+    :root{--pad:20px}
+    .freq-row{flex-direction:column;align-items:flex-start;gap:3px}
+    .score-grid{grid-template-columns:1fr 1fr}
+    .btn{width:100%;text-align:center}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="logo" href="/">Созда<span class="hl">тель</span></a>
+    <a class="link" href="/">← Проверить другую идею</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="crumbs">
+    <span class="done">✓ Ступень 1 · Спрос</span>
+    <span>→</span>
+    <span class="cur">Ступень 2 · Проверка на живых людях</span>
+  </div>
+
+  <div class="head">
+    <h1>Результат проверки спроса</h1>
+    <p class="idea" id="idea">__IDEA__</p>
+    <div class="share"><button id="share-btn" type="button">Поделиться результатом</button></div>
+    <p class="paid-note" id="paid-note">Оплата принята. Мы запускаем живой тест вашей идеи — вернёмся с первыми цифрами.</p>
+  </div>
+
+  <div class="res-block">
+    <div class="res-title">Сколько ищут в Яндексе · Россия · в месяц</div>
+    <div id="freqs"></div>
+    <div id="verdict-wrap"></div>
+  </div>
+  <div class="res-block" id="score-card" style="display:none">
+    <div class="res-title">Оценка идеи</div>
+    <div class="overall" id="overall" style="display:none">
+      <span class="overall-val" id="overall-val"></span>
+      <span class="overall-note" id="overall-note"></span>
+    </div>
+    <div class="score-grid" id="scores"></div>
+  </div>
+  <div class="res-block" id="comp-card" style="display:none">
+    <div class="res-title">Кто уже отвечает на этот спрос</div>
+    <div id="comps"></div>
+  </div>
+
+  <div class="next" id="order">
+    <h3>Ступень 2 — узнаем, <span class="hl">оставят ли заявку</span></h3>
+    <p>Соберём проверочную страницу под вашу идею, запустим рекламу в Яндексе по инструкции и посчитаем живые заявки. Поиск показал интерес — живой тест покажет готовность платить.</p>
+    <input id="contact" placeholder="Телеграм или почта — куда вернуться с результатом">
+    <button class="btn" id="order-btn" type="button"></button>
+    <p class="err" id="order-err" role="alert"></p>
+    <p class="okmsg" id="order-ok"></p>
+  </div>
+</main>
+
+<script>
+const DATA = __RESULT_JSON__;
+const CHECK_ID = __CHECK_ID__;
+const PRICE = __PRICE__;
+const PAY_ENABLED = __PAY_ENABLED__;
+
+function fmt(n){ return n.toLocaleString('ru-RU'); }
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById('freqs').innerHTML = (DATA.formulations||[]).map(f => `
+  <div class="freq-row">
+    <span>${escapeHtml(f.phrase)}</span>
+    <span>${f.count === null
+      ? '<span class="freq-num na">нет данных</span>'
+      : `<span class="freq-num">${fmt(f.count)}</span><span class="freq-unit">запросов/мес</span>`}
+    </span>
+  </div>`).join('');
+
+const v = DATA.verdict || {};
+document.getElementById('verdict-wrap').innerHTML =
+  `<div class="verdict ${v.level || 'unknown'}">${escapeHtml(v.text || '')}</div>`;
+
+const sc = DATA.scores || [];
+if (sc.length) {
+  document.getElementById('score-card').style.display = '';
+  const ov = DATA.overall;
+  if (ov && ov.value !== null) {
+    document.getElementById('overall').style.display = '';
+    document.getElementById('overall-val').textContent = ov.value + '/10';
+    document.getElementById('overall-note').textContent =
+      ov.weakest ? 'Слабое место — ' + ov.weakest.toLowerCase() : '';
+  }
+  document.getElementById('scores').innerHTML = sc.map(s => `
+    <div class="score-cell">
+      <div><span class="score-val">${s.value === null ? '—' : escapeHtml(String(s.value))}</span><span class="score-max">/10</span></div>
+      <div class="score-label">${escapeHtml(s.label)}</div>
+      ${s.note ? `<div class="score-note">${escapeHtml(s.note)}</div>` : ''}
+    </div>`).join('');
+}
+
+const comp = DATA.competitors || {};
+if (comp.top && comp.top.length) {
+  document.getElementById('comp-card').style.display = '';
+  const found = comp.found ? `<div class="fine" style="margin-bottom:8px">В выдаче по запросу «${escapeHtml(DATA.best_phrase||'')}» — ${fmt(comp.found)} страниц. Топ сейчас занимают:</div>` : '';
+  document.getElementById('comps').innerHTML = found + comp.top.map(c => `
+    <div class="comp-item"><span class="comp-domain">${escapeHtml(c.domain)}</span><span>${escapeHtml(c.title)}</span></div>`).join('');
+}
+
+if (new URLSearchParams(location.search).get('paid') === '1') {
+  document.getElementById('paid-note').classList.add('show');
+}
+
+const orderBtn = document.getElementById('order-btn');
+orderBtn.textContent = PAY_ENABLED
+  ? `Оплатить и запустить — ${fmt(PRICE)} ₽`
+  : 'Оставить заявку на живой тест';
+
+orderBtn.addEventListener('click', async () => {
+  const errEl = document.getElementById('order-err');
+  errEl.classList.remove('show');
+  orderBtn.disabled = true;
+  const label = orderBtn.textContent;
+  orderBtn.textContent = 'Секунду…';
+  try {
+    const r = await fetch('/api/live-test', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({check_id: CHECK_ID, contact: document.getElementById('contact').value})
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || data.detail || 'Не получилось. Попробуйте ещё раз.');
+    if (data.paid && data.confirmation_url) { location.href = data.confirmation_url; return; }
+    const ok = document.getElementById('order-ok');
+    ok.textContent = data.message; ok.classList.add('show');
+    orderBtn.style.display = 'none';
+    document.getElementById('contact').disabled = true;
+  } catch (e) {
+    errEl.textContent = e.message; errEl.classList.add('show');
+  } finally {
+    if (orderBtn.style.display !== 'none') { orderBtn.disabled = false; orderBtn.textContent = label; }
+  }
+});
+
+document.getElementById('share-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('share-btn');
+  const url = location.origin + location.pathname;
+  if (navigator.share) { try { await navigator.share({title: 'Проверка спроса — Создатель', url}); } catch(e){} return; }
+  try { await navigator.clipboard.writeText(url); btn.textContent = 'Ссылка скопирована'; 
+    setTimeout(()=>{btn.textContent='Поделиться результатом';}, 1600); } catch(e){}
+});
+</script>
+</body>
+</html>
