@@ -815,6 +815,19 @@ class TestWordstatDualPath:
         out = asyncio.run(wordstat_count("тест фраза", _post=post))
         assert out == 700
 
+    def test_cloud_path_sends_num_phrases_in_valid_range(self, monkeypatch):
+        """Регрессия: без num_phrases Cloud Search API отвечал 400 "Value must
+        be in the range of 1 to 2000" на КАЖДЫЙ запрос -- частотность никогда
+        не считалась, независимо от ключей/токенов (см. живой /api/diag/yandex)."""
+        monkeypatch.delenv("YANDEX_WORDSTAT_OAUTH_TOKEN", raising=False)
+        captured = {}
+        async def post(provider, payload):
+            captured.update(payload)
+            return {"totalCount": 123}
+        asyncio.run(wordstat_count("тест фраза", _post=post))
+        assert "num_phrases" in captured
+        assert 1 <= captured["num_phrases"] <= 2000
+
 
 class TestDiagYandex:
     def test_requires_owner_key(self):
@@ -1148,6 +1161,33 @@ class TestPayments:
         assert pid == "pay_123" and url.startswith("https://")
         assert captured["amount"]["value"] == "1490.00"
         assert captured["metadata"]["order_id"] == "7"
+
+    def test_create_payment_includes_receipt_54fz(self):
+        """Регрессия: без receipt ЮКасса отвечала 400 "Receipt is missing or
+        illegal" на КАЖДЫЙ платёж -- см. живой прогон владельца."""
+        from app.payments import create_payment
+        captured = {}
+        async def post(kind, payload):
+            captured.update(payload)
+            return {"id": "pay_1", "confirmation": {"confirmation_url": "https://yookassa.example/pay"}}
+        asyncio.run(create_payment(7, 990, "Создатель · отчёт", "https://x/report/1?paid=1",
+                                   contact="user@example.com", _post=post))
+        receipt = captured["receipt"]
+        assert receipt["items"][0]["amount"]["value"] == "990.00"
+        assert receipt["items"][0]["vat_code"] == 1
+        assert receipt["customer"]["email"] == "user@example.com"
+
+    def test_receipt_without_email_or_phone_omits_customer(self):
+        """contact = телеграм-хэндл -- чек всё равно валиден (есть items),
+        просто без адресата доставки, который ЮКасса не примет как email/phone."""
+        from app.payments import create_payment
+        captured = {}
+        async def post(kind, payload):
+            captured.update(payload)
+            return {"id": "pay_2", "confirmation": {"confirmation_url": "https://yookassa.example/pay"}}
+        asyncio.run(create_payment(7, 990, "Создатель · отчёт", "https://x/report/1?paid=1",
+                                   contact="@telegram_handle", _post=post))
+        assert "customer" not in captured["receipt"]
 
     def test_webhook_marks_order_paid_only_after_verification(self, monkeypatch):
         import app.main as m

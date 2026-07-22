@@ -155,7 +155,10 @@ async def _wordstat_cloud_raw(phrase: str, *, _post=None) -> dict:
     folder_id = os.environ.get("YANDEX_FOLDER_ID")
     if (not api_key or not folder_id) and _post is None:
         return {"ok": False, "skipped": "YANDEX_API_KEY/YANDEX_FOLDER_ID не заданы"}
-    payload = {"phrase": phrase, "regions": [RUSSIA_REGION], "folderId": folder_id}
+    # num_phrases обязателен (1..2000) -- без него API возвращал 400
+    # "Value must be in the range of 1 to 2000" на КАЖДЫЙ запрос; нам нужен
+    # только totalCount самой фразы, не список похожих, поэтому просим минимум.
+    payload = {"phrase": phrase, "regions": [RUSSIA_REGION], "folderId": folder_id, "num_phrases": 1}
     try:
         if _post is not None:
             data = await _post("wordstat", payload)
