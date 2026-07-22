@@ -295,17 +295,33 @@ async function order(tier){
 }
 
 // --- После редиректа с оплаты: поллим статус, пока вебхук не подтвердит ---
-if (new URLSearchParams(location.search).get('paid') === '1' && UNLOCKED_TIER !== 'full') {
-  let tries = 0;
-  const poll = setInterval(async () => {
-    tries++;
-    try {
-      const r = await fetch(`/api/report/${CHECK_ID}/status`);
-      const d = await r.json();
-      if (d.paid) { clearInterval(poll); location.reload(); }
-    } catch (e) {}
-    if (tries >= 10) clearInterval(poll);
-  }, 2000);
+if (new URLSearchParams(location.search).get('paid') === '1') {
+  if (UNLOCKED_TIER) {
+    // Уже подтверждено (либо этот же load после reload ниже, либо повторный
+    // визит по старой ссылке с ?paid=1) -- цель шлём один раз через localStorage,
+    // иначе каждый повторный визит/reload задвоил бы конверсию в Метрике.
+    const goalKey = `sozdatel_ym_report_${CHECK_ID}_${UNLOCKED_TIER}`;
+    if (!localStorage.getItem(goalKey)) {
+      if (window.SOZDATEL_YM_ID && typeof ym === 'function') {
+        ym(window.SOZDATEL_YM_ID, 'reachGoal', UNLOCKED_TIER === 'full' ? 'report_paid_full' : 'report_paid_quick');
+      }
+      localStorage.setItem(goalKey, '1');
+    }
+  } else {
+    // Вебхук ЮКассы ещё не подтвердил оплату -- ждём. Условие именно
+    // "ничего не оплачено", а не "не полный тариф": иначе после покупки
+    // quick страница reload'илась бы этим же поллером бесконечно каждые 2с.
+    let tries = 0;
+    const poll = setInterval(async () => {
+      tries++;
+      try {
+        const r = await fetch(`/api/report/${CHECK_ID}/status`);
+        const d = await r.json();
+        if (d.paid) { clearInterval(poll); location.reload(); }
+      } catch (e) {}
+      if (tries >= 10) clearInterval(poll);
+    }, 2000);
+  }
 }
 </script>
 </body>
