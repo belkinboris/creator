@@ -112,6 +112,122 @@ class TestOfferEngine:
         assert out["offers"][0]["idea_id"] == "a0"
 
 
+DEMAND_DATA_FIXTURE = {
+    "formulations": [{"phrase": "ответы на отзывы вайлдберриз", "count": 5200}],
+    "verdict": {"level": "strong", "text": "Спрос есть"},
+    "competitors": {"found": 15000, "top": [{"title": "Т", "domain": "t.ru"}]},
+    "scores": [{"key": "demand", "label": "Спрос", "value": 8, "note": ""}],
+    "overall": {"value": 8, "weakest": "Спрос"},
+}
+
+
+def _report_body(keys, risk_count=2) -> dict:
+    return {
+        "viability_score": 62,
+        "viability_summary": "Спрос подтверждён, но ниша уже занята двумя игроками.",
+        "top_risks": [{"title": f"Риск {i}", "body": f"Объяснение риска {i}."} for i in range(risk_count)],
+        "sections": {k: "Абзац один.\n\nАбзац два." for k in keys},
+    }
+
+
+class TestReportEngine:
+    """Движок платного отчёта -- та же дисциплина, что offer_engine.py:
+    честный LLM-вызов, строго провалидированный выход. Использует более
+    сильную модель Yandex AI Studio (см. _call_llm), а не Anthropic/Claude --
+    трансграничная передача данных запрещена для проекта (152-ФЗ), и Claude
+    в любом случае заблокирован Роскомнадзором."""
+
+    def test_short_idea_rejected(self):
+        from app.report_engine import generate_report, ReportEngineError
+        with pytest.raises(ReportEngineError):
+            asyncio.run(generate_report("коротко", DEMAND_DATA_FIXTURE, "quick"))
+
+    def test_uses_dedicated_stronger_yandex_model(self):
+        """Не Anthropic -- отдельная, более сильная модель внутри того же
+        Yandex-провайдера, что и остальной проект."""
+        from app.report_engine import generate_report, QUICK_KEYS, SOZDATEL_REPORT_MODEL
+        captured = {}
+        async def fake_post(provider, payload):
+            assert provider == "yandex"
+            captured.update(payload)
+            return _yandex_response(json.dumps(_report_body(QUICK_KEYS, 2), ensure_ascii=False))
+        asyncio.run(generate_report("Сервис отвечает на отзывы за селлеров маркетплейсов",
+                                    DEMAND_DATA_FIXTURE, "quick", _post=fake_post))
+        assert captured["model"] == f"gpt://test-folder/{SOZDATEL_REPORT_MODEL}"
+
+    def test_quick_tier_returns_four_sections_and_two_risks(self):
+        from app.report_engine import generate_report, QUICK_KEYS
+        async def fake_post(provider, payload):
+            return _yandex_response(json.dumps(_report_body(QUICK_KEYS, 2), ensure_ascii=False))
+        out = asyncio.run(generate_report("Сервис отвечает на отзывы за селлеров маркетплейсов",
+                                          DEMAND_DATA_FIXTURE, "quick", _post=fake_post))
+        assert [s["key"] for s in out["sections"]] == QUICK_KEYS
+        assert len(out["top_risks"]) == 2
+        assert out["viability_score"] == 62
+
+    def test_full_tier_returns_all_eight_sections_and_three_risks(self):
+        from app.report_engine import generate_report, ALL_SECTIONS
+        keys = [k for k, _ in ALL_SECTIONS]
+        async def fake_post(provider, payload):
+            return _yandex_response(json.dumps(_report_body(keys, 3), ensure_ascii=False))
+        out = asyncio.run(generate_report("Сервис отвечает на отзывы за селлеров маркетплейсов",
+                                          DEMAND_DATA_FIXTURE, "full", _post=fake_post))
+        assert len(out["sections"]) == 8
+        assert len(out["top_risks"]) == 3
+
+    def test_missing_section_rejected(self):
+        from app.report_engine import generate_report, ReportEngineError, QUICK_KEYS
+        async def fake_post(provider, payload):
+            body = _report_body(QUICK_KEYS[:-1], 2)   # не хватает одной секции
+            return _yandex_response(json.dumps(body, ensure_ascii=False))
+        with pytest.raises(ReportEngineError):
+            asyncio.run(generate_report("Сервис отвечает на отзывы за селлеров маркетплейсов",
+                                        DEMAND_DATA_FIXTURE, "quick", _post=fake_post))
+
+    def test_missing_viability_score_rejected(self):
+        from app.report_engine import generate_report, ReportEngineError, QUICK_KEYS
+        async def fake_post(provider, payload):
+            body = _report_body(QUICK_KEYS, 2)
+            del body["viability_score"]
+            return _yandex_response(json.dumps(body, ensure_ascii=False))
+        with pytest.raises(ReportEngineError):
+            asyncio.run(generate_report("Сервис отвечает на отзывы за селлеров маркетплейсов",
+                                        DEMAND_DATA_FIXTURE, "quick", _post=fake_post))
+
+    def test_too_few_risks_rejected(self):
+        from app.report_engine import generate_report, ReportEngineError, QUICK_KEYS
+        async def fake_post(provider, payload):
+            return _yandex_response(json.dumps(_report_body(QUICK_KEYS, 1), ensure_ascii=False))   # нужно 2 для quick
+        with pytest.raises(ReportEngineError):
+            asyncio.run(generate_report("Сервис отвечает на отзывы за селлеров маркетплейсов",
+                                        DEMAND_DATA_FIXTURE, "quick", _post=fake_post))
+
+    def test_truncated_json_retried_once_then_ok(self):
+        from app.report_engine import generate_report, QUICK_KEYS
+        calls = {"n": 0}
+        async def fake_post(provider, payload):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _yandex_response('{"sections": {"summary": "обрыв')   # битый JSON
+            return _yandex_response(json.dumps(_report_body(QUICK_KEYS, 2), ensure_ascii=False))
+        out = asyncio.run(generate_report("Сервис отвечает на отзывы за селлеров маркетплейсов",
+                                          DEMAND_DATA_FIXTURE, "quick", _post=fake_post))
+        assert calls["n"] == 2 and len(out["sections"]) == 4
+
+    def test_uses_real_demand_numbers_in_context(self):
+        """Отличие от дженерик-генераторов -- реальные цифры уходят в промпт."""
+        from app.report_engine import generate_report, QUICK_KEYS
+        captured = {}
+        async def fake_post(provider, payload):
+            captured.update(payload)
+            return _yandex_response(json.dumps(_report_body(QUICK_KEYS, 2), ensure_ascii=False))
+        asyncio.run(generate_report("Сервис отвечает на отзывы за селлеров маркетплейсов",
+                                    DEMAND_DATA_FIXTURE, "quick", _post=fake_post))
+        user_content = captured["input"]
+        assert "5200" in user_content or "5 200" in user_content
+        assert "t.ru" in user_content
+
+
 class TestLandingAndLaunch:
     def test_render_fills_all_slots(self):
         html = render_landing(VALID_OFFER)
@@ -999,7 +1115,7 @@ class TestPayments:
         оплата должна возвращать на главную, а не на несуществующую /r/."""
         import app.main as m
         captured = {}
-        async def fake_create_payment(order_id, amount, description, return_url):
+        async def fake_create_payment(order_id, amount, description, return_url, **kw):
             captured["return_url"] = return_url
             return "pay_x", "https://yookassa.example/pay"
         monkeypatch.setattr(m.payments, "configured", lambda: True)
@@ -1012,7 +1128,7 @@ class TestPayments:
     def test_live_test_return_url_uses_check_id_when_present(self, monkeypatch):
         import app.main as m
         captured = {}
-        async def fake_create_payment(order_id, amount, description, return_url):
+        async def fake_create_payment(order_id, amount, description, return_url, **kw):
             captured["return_url"] = return_url
             return "pay_y", "https://yookassa.example/pay"
         monkeypatch.setattr(m.payments, "configured", lambda: True)
@@ -1124,6 +1240,132 @@ class TestSharpenPublic:
         assert "Заострим идею" in text
 
 
+class TestReportFlow:
+    """Платный отчёт/бизнес-план: заказ, оплата, ленивая генерация после
+    оплаты, роутинг вебхука между LiveTestOrder и ReportPurchase."""
+
+    def _make_check(self):
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "тест фраза", "count": 4200}],
+                    "best_phrase": "тест фраза",
+                    "verdict": {"level": "strong", "text": "Спрос есть"},
+                    "competitors": {"found": 100, "top": [{"title": "Т", "domain": "t.ru"}]},
+                    "scores": [{"key": "demand", "label": "Спрос", "value": 8, "note": ""}],
+                    "overall": {"value": 8, "weakest": "Спрос"}}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            r = client.post("/api/demand", json={"idea": "Идея достаточно длинная для отчёта"})
+            return r.json()["id"]
+        finally:
+            m.check_demand = orig
+
+    def test_report_order_requires_check_id(self):
+        r = client.post("/api/report", json={"tier": "quick", "contact": "@x"})
+        assert r.status_code == 400
+
+    def test_report_order_requires_contact(self):
+        rid = self._make_check()
+        r = client.post("/api/report", json={"check_id": rid, "tier": "quick", "contact": "x"})
+        assert r.status_code == 400
+
+    def test_report_order_unknown_check_id_404(self):
+        r = client.post("/api/report", json={"check_id": 999999, "tier": "quick", "contact": "@no_such_check"})
+        assert r.status_code == 404
+
+    def test_report_order_without_payments_is_request(self):
+        rid = self._make_check()
+        r = client.post("/api/report", json={"check_id": rid, "tier": "quick", "contact": "@report_x"})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["ok"] is True and d["paid"] is False and "Заявка принята" in d["message"]
+
+    def test_bad_tier_falls_back_to_quick(self):
+        from app.main import ReportPurchase, Session, engine, select
+        rid = self._make_check()
+        r = client.post("/api/report", json={"check_id": rid, "tier": "premium!!", "contact": "@bad_tier"})
+        assert r.status_code == 200
+        with Session(engine) as s:
+            order = s.exec(select(ReportPurchase).where(ReportPurchase.contact == "@bad_tier")).first()
+            assert order.tier == "quick"
+
+    def test_report_page_shows_free_preview_and_locked_sections(self):
+        rid = self._make_check()
+        text = client.get(f"/report/{rid}").text
+        assert "4 200" in text or "4200" in text   # частотность в тизере, без LLM
+        assert "Резюме проекта" in text and "Вердикт" in text
+        assert "оффер" not in text.lower() and "лендинг" not in text.lower()
+
+    def test_report_page_404_for_missing_check(self):
+        assert client.get("/report/999999").status_code == 404
+
+    def test_report_status_endpoint(self):
+        rid = self._make_check()
+        r = client.get(f"/api/report/{rid}/status")
+        assert r.status_code == 200 and r.json() == {"paid": False, "tier": None}
+
+    def test_report_unlocks_after_paid_and_generates_lazily_once(self, monkeypatch):
+        import app.main as m
+        from app.main import ReportPurchase, Session, engine, select
+        rid = self._make_check()
+        client.post("/api/report", json={"check_id": rid, "tier": "quick", "contact": "@unlock_test"})
+        with Session(engine) as s:
+            order = s.exec(select(ReportPurchase).where(ReportPurchase.contact == "@unlock_test")).first()
+            order.status = "paid"; s.add(order); s.commit(); oid = order.id
+
+        async def fake_generate(idea, demand_data, tier, chosen_offer=None):
+            return {"sections": [{"key": "summary", "title": "Резюме проекта", "body": "Тестовый текст отчёта."}]}
+        monkeypatch.setattr(m, "generate_report", fake_generate)
+
+        text = client.get(f"/report/{rid}").text
+        assert "Тестовый текст отчёта." in text
+        with Session(engine) as s:
+            assert s.get(ReportPurchase, oid).report_json   # сохранён после генерации
+
+        # повторный визит не должен звать LLM снова -- report_json уже есть
+        monkeypatch.setattr(m, "generate_report", None)
+        text2 = client.get(f"/report/{rid}").text
+        assert "Тестовый текст отчёта." in text2
+
+    def test_report_generation_failure_shows_friendly_error(self, monkeypatch):
+        import app.main as m
+        from app.report_engine import ReportEngineError
+        from app.main import ReportPurchase, Session, engine, select
+        rid = self._make_check()
+        client.post("/api/report", json={"check_id": rid, "tier": "quick", "contact": "@fail_test"})
+        with Session(engine) as s:
+            order = s.exec(select(ReportPurchase).where(ReportPurchase.contact == "@fail_test")).first()
+            order.status = "paid"; s.add(order); s.commit()
+
+        async def failing(idea, demand_data, tier, chosen_offer=None):
+            raise ReportEngineError("ИИ думал слишком долго. Подождите минуту и попробуйте ещё раз.")
+        monkeypatch.setattr(m, "generate_report", failing)
+        text = client.get(f"/report/{rid}").text
+        assert "Не получилось собрать отчёт" in text
+
+    def test_webhook_routes_report_kind_to_report_purchase(self, monkeypatch):
+        import app.main as m
+        from app.main import ReportPurchase, Session, engine
+        with Session(engine) as s:
+            rep = ReportPurchase(idea="и", contact="@rep", status="pending_payment",
+                                payment_id="pay_rep", amount=990, tier="quick")
+            s.add(rep); s.commit(); s.refresh(rep); rep_id = rep.id
+        async def fake_fetch(pid, **kw):
+            return {"status": "succeeded", "metadata": {"order_id": str(rep_id), "kind": "report"}}
+        monkeypatch.setattr(m.payments, "fetch_payment", fake_fetch)
+        r = client.post("/api/yookassa/webhook",
+                        json={"event": "payment.succeeded", "object": {"id": "pay_rep"}})
+        assert r.status_code == 200
+        with Session(engine) as s:
+            assert s.get(ReportPurchase, rep_id).status == "paid"
+
+    def test_funnel_links_to_report(self):
+        text = client.get(f"/r/{self._make_check()}").text
+        assert "/report/" in text
+        assert "отчёт по идее" in text.lower()
+
+
 class TestGuideDirect:
     def test_guide_page_serves(self):
         r = client.get("/guide/direct")
@@ -1233,6 +1475,44 @@ class TestFooterLinks:
 
     def test_guide_direct_has_footer(self):
         self._assert_footer(client.get("/guide/direct").text, "гайда по Директу")
+
+    def test_social_contract_has_footer(self):
+        self._assert_footer(client.get("/social-contract").text, "соцконтракт-страницы")
+
+
+class TestSocialContractPage:
+    """Отдельная посадочная страница под рекламу на аудиторию социального
+    контракта -- не часть общего позиционирования сайта (см. CLAUDE.md),
+    доступна только по прямой ссылке /social-contract."""
+
+    def test_page_loads_and_mentions_social_contract(self):
+        r = client.get("/social-contract")
+        assert r.status_code == 200
+        assert "социального контракта" in r.text.lower() or "социальн" in r.text.lower()
+
+    def test_no_jargon(self):
+        text = client.get("/social-contract").text
+        assert "оффер" not in text.lower()
+        assert "лендинг" not in text.lower()
+
+    def test_shares_free_demand_check_funnel(self):
+        """Ведёт в тот же бесплатный /api/demand, что и главная -- не отдельный
+        продукт с собственным бэкендом."""
+        text = client.get("/social-contract").text
+        assert "/api/demand" in text
+        assert 'id="idea"' in text
+
+    def test_not_linked_from_homepage(self):
+        """Страница не часть общего позиционирования -- не должна светиться
+        в навигации главной, чтобы не отпугивать массового пользователя
+        упоминанием соцконтракта/грантов."""
+        assert "/social-contract" not in client.get("/").text
+
+    def test_uses_light_design_system(self):
+        text = client.get("/social-contract").text
+        assert "IBM Plex" in text
+        assert "#FBF6EA" in text
+        assert "Manrope" not in text and "Onest" not in text
 
 
 class TestProjectPage:
