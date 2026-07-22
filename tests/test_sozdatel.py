@@ -1835,6 +1835,12 @@ class TestAccountCabinet:
         assert d["contact"] == contact
         assert [p["idea_id"] for p in d["projects"]] == ["cab_proj_v1"]
         assert len(d["reports"]) == 1 and d["reports"][0]["idea"] == "идея с отчётом"
+        # Та же карточка, что видит владелец в /api/cabinet -- этап, вердикт,
+        # прогресс, а не голая ссылка (по фидбеку: "какой-то ты страшненький
+        # кабинет сделал", нужны те же карты, что в /desk).
+        proj = d["projects"][0]
+        for key in ("stage", "stage_name", "views", "leads", "rate", "target", "verdict", "next_step", "progress"):
+            assert key in proj, f"в карточке проекта личного кабинета нет поля {key}"
 
     def test_logout_clears_cookie(self):
         r = client.post("/api/account/logout")

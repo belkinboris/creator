@@ -728,6 +728,34 @@ def compute_verdict(views: int, leads: int, target: int, signal: float, dead: fl
             "detail": f"{rate:.0%} заявок. Попробовать второй оффер (другой заголовок) на том же трафике."}
 
 
+def _smoke_card(p: "SmokeProject", views: int, leads: int) -> dict:
+    """Карточка проекта -- общая для владельца (/api/cabinet) и покупателя
+    (/api/account/me), чтобы оба видели один и тот же язык: этап 0..7,
+    прогресс, вердикт. Smoke-этап определяется данными: есть клики -> ①
+    Спрос, иначе ⓪ Идея."""
+    stage = 1 if views > 0 else 0
+    v = compute_verdict(views, leads, p.click_target, p.lead_rate_signal, p.lead_rate_dead)
+    rate = (leads / views) if views else 0.0
+    if views == 0:
+        next_step = "Запустить Директ на страницу — инструкция: /guide/direct"
+    elif views < p.click_target:
+        next_step = f"Копим клики: {p.click_target - views} до вердикта. Ничего не менять."
+    elif v["verdict"] == "СИГНАЛ ЕСТЬ":
+        next_step = "Сигнал есть → идея в очередь на MVP"
+    elif v["verdict"] == "СПРОСА НЕТ":
+        next_step = "Спроса нет → остановить кампанию, идею в архив"
+    else:
+        next_step = "Серая зона → второй оффер на том же трафике"
+    return {"idea_id": p.idea_id, "name": p.product_name,
+            "stage": stage, "stage_name": STAGE_NAMES[stage],
+            "views": views, "leads": leads, "rate": round(rate * 100),
+            "target": p.click_target, "verdict": v["verdict"],
+            "next_step": next_step,
+            "progress": min(100, round(views / p.click_target * 100)) if p.click_target else 0,
+            "landing_url": f"/l/{p.idea_id}",
+            "project_url": f"/p/{p.idea_id}"}
+
+
 @app.get("/api/verdict/{idea_id}")
 def verdict(idea_id: str, request: Request):
     _check_owner(request)
@@ -925,30 +953,8 @@ def cabinet(request: Request):
             counts[(idea, event)] += 1
 
         for p in s.exec(select(SmokeProject).order_by(SmokeProject.created_at.desc())).all():
-            views = counts[(p.idea_id, "page_view")]
-            leads = counts[(p.idea_id, "lead_submitted")]
-            stage = 1 if views > 0 else 0
-            v = compute_verdict(views, leads, p.click_target,
-                                p.lead_rate_signal, p.lead_rate_dead)
-            rate = (leads / views) if views else 0.0
-            if views == 0:
-                next_step = "Запустить Директ на страницу — инструкция: /guide/direct"
-            elif views < p.click_target:
-                next_step = f"Копим клики: {p.click_target - views} до вердикта. Ничего не менять."
-            elif v["verdict"] == "СИГНАЛ ЕСТЬ":
-                next_step = "Сигнал есть → идея в очередь на MVP"
-            elif v["verdict"] == "СПРОСА НЕТ":
-                next_step = "Спроса нет → остановить кампанию, идею в архив"
-            else:
-                next_step = "Серая зона → второй оффер на том же трафике"
-            out["smoke"].append({"idea_id": p.idea_id, "name": p.product_name,
-                                 "stage": stage, "stage_name": STAGE_NAMES[stage],
-                                 "views": views, "leads": leads, "rate": round(rate * 100),
-                                 "target": p.click_target, "verdict": v["verdict"],
-                                 "next_step": next_step,
-                                 "progress": min(100, round(views / p.click_target * 100)) if p.click_target else 0,
-                                 "landing_url": f"/l/{p.idea_id}",
-                                 "project_url": f"/p/{p.idea_id}"})
+            out["smoke"].append(_smoke_card(p, counts[(p.idea_id, "page_view")],
+                                            counts[(p.idea_id, "lead_submitted")]))
         wl = s.exec(select(SmokeEvent.contact).where(
             SmokeEvent.idea == "sozdatel_waitlist",
             SmokeEvent.event == "lead_submitted")).all()
@@ -1125,10 +1131,17 @@ def account_me(request: Request):
         reports = s.exec(select(ReportPurchase).where(
             ReportPurchase.contact == contact, ReportPurchase.status == "paid"
         ).order_by(ReportPurchase.created_at.desc())).all()
+        from collections import defaultdict
+        idea_ids = [p.idea_id for p in projects]
+        counts: dict[tuple[str, str], int] = defaultdict(int)
+        if idea_ids:
+            for idea, event in s.exec(select(SmokeEvent.idea, SmokeEvent.event)
+                                      .where(SmokeEvent.idea.in_(idea_ids))).all():
+                counts[(idea, event)] += 1
     return {
         "ok": True, "contact": contact,
-        "projects": [{"idea_id": p.idea_id, "product_name": p.product_name,
-                      "project_url": f"/p/{p.idea_id}"} for p in projects],
+        "projects": [_smoke_card(p, counts[(p.idea_id, "page_view")],
+                                 counts[(p.idea_id, "lead_submitted")]) for p in projects],
         "reports": [{"check_id": r.check_id, "idea": r.idea, "tier": r.tier,
                      "report_url": f"/report/{r.check_id}"} for r in reports],
     }
