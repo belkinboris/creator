@@ -393,6 +393,7 @@ def _report_preview(demand_data: dict) -> dict:
     known = [f["count"] for f in formulations if f.get("count") is not None]
     top = max(known) if known else None
     comp = demand_data.get("competitors") or {}
+    top_names = [c.get("domain") or c.get("title") or "" for c in (comp.get("top") or [])[:3]]
     return {
         "best_count": top,
         "verdict_text": v.get("text", ""),
@@ -400,6 +401,7 @@ def _report_preview(demand_data: dict) -> dict:
         "overall_value": overall.get("value"),
         "weakest": overall.get("weakest", ""),
         "competitors_count": len(comp.get("top") or []),
+        "top_competitor_names": [n for n in top_names if n],
     }
 
 

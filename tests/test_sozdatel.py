@@ -1297,6 +1297,22 @@ class TestReportFlow:
         assert "Резюме проекта" in text and "Вердикт" in text
         assert "оффер" not in text.lower() and "лендинг" not in text.lower()
 
+    def test_free_preview_includes_verdict_and_competitor_names(self):
+        """Бесплатный тизер — не только цифры: вердикт и реальные конкуренты,
+        чтобы решение о покупке не требовало долистывать весь блюр."""
+        rid = self._make_check()
+        text = client.get(f"/report/{rid}").text
+        assert "t.ru" in text
+        assert "Спрос есть" in text
+
+    def test_pricing_shown_near_top_not_only_at_bottom(self):
+        """Цены не только в самом низу заблюренного отчёта -- дублируются
+        сразу после бесплатного тизера, чтобы не заставлять листать весь блюр."""
+        rid = self._make_check()
+        text = client.get(f"/report/{rid}").text
+        assert 'id="pricing-top"' in text
+        assert text.index('id="pricing-top"') < text.index('id="sections"')
+
     def test_report_page_404_for_missing_check(self):
         assert client.get("/report/999999").status_code == 404
 
