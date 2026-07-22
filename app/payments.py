@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 
 import httpx
@@ -21,6 +22,15 @@ import httpx
 logger = logging.getLogger(__name__)
 
 API_URL = "https://api.yookassa.ru/v3/payments"
+
+# Чек 54-ФЗ: без объекта receipt ЮКасса отклоняет платёж целиком (HTTP 400
+# "Receipt is missing or illegal") -- это не опция, а обязательное поле для
+# счетов с включённой фискализацией. vat_code зависит от налогового режима
+# продавца -- 1 = "без НДС" (УСН "доходы", самозанятый, патент и т.п.).
+YOOKASSA_VAT_CODE = int(os.environ.get("YOOKASSA_VAT_CODE", "1"))
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PHONE_RE = re.compile(r"^\+?\d[\d\s\-()]{6,}\d$")
 
 
 class PaymentsError(Exception):
@@ -35,8 +45,30 @@ def _auth() -> tuple[str, str]:
     return (os.environ.get("YOOKASSA_SHOP_ID", ""), os.environ.get("YOOKASSA_SECRET_KEY", ""))
 
 
+def _receipt(amount_rub: int, description: str, contact: str) -> dict:
+    """Чек для одной услуги. contact у нас — «телеграм или почта», без
+    жёсткого формата: если похоже на email/телефон, кладём в customer (тогда
+    ЮКасса ещё и отправит чек покупателю), иначе -- чек всё равно валиден,
+    просто без адресата доставки."""
+    item = {
+        "description": description[:128],
+        "quantity": "1.00",
+        "amount": {"value": f"{amount_rub}.00", "currency": "RUB"},
+        "vat_code": YOOKASSA_VAT_CODE,
+        "payment_subject": "service",
+        "payment_mode": "full_payment",
+    }
+    receipt: dict = {"items": [item]}
+    contact = (contact or "").strip()
+    if _EMAIL_RE.match(contact):
+        receipt["customer"] = {"email": contact}
+    elif _PHONE_RE.match(contact):
+        receipt["customer"] = {"phone": re.sub(r"[^\d+]", "", contact)}
+    return receipt
+
+
 async def create_payment(order_id: int, amount_rub: int, description: str,
-                         return_url: str, *, kind: str = "livetest", _post=None) -> tuple[str, str]:
+                         return_url: str, *, kind: str = "livetest", contact: str = "", _post=None) -> tuple[str, str]:
     """Создаёт платёж -> (payment_id, confirmation_url). Idempotence-Key
     привязан к заказу: повторный клик не создаст второй платёж.
 
@@ -48,6 +80,7 @@ async def create_payment(order_id: int, amount_rub: int, description: str,
         "confirmation": {"type": "redirect", "return_url": return_url},
         "description": description[:128],
         "metadata": {"order_id": str(order_id), "kind": kind},
+        "receipt": _receipt(amount_rub, description, contact),
     }
     try:
         if _post is not None:

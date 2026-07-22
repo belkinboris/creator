@@ -29,10 +29,12 @@
 
   /* Бесплатный тизер — виден всегда, посчитан на бесплатных данных проверки спроса */
   .preview{border:1px solid var(--line);background:var(--box);border-radius:8px;
-    padding:18px;margin:18px 0;display:flex;gap:28px;flex-wrap:wrap}
+    padding:18px;margin:18px 0 0;display:flex;gap:28px;flex-wrap:wrap}
   .preview .stat b{font:600 24px "IBM Plex Mono",monospace;display:block;
     background:linear-gradient(transparent 45%, var(--marker) 45%);padding:0 3px;width:fit-content}
   .preview .stat span{display:block;color:var(--muted);font-size:13px;margin-top:5px;max-width:16em}
+  .preview-note{color:var(--ink);font-size:15px;max-width:56em;margin:12px 0 18px}
+  .preview-note b{font-weight:600}
 
   /* Балл жизнеспособности + топ-риски -- появляются сразу после разблокировки,
      до подробных секций, как самый весомый вывод отчёта */
@@ -71,13 +73,15 @@
   .section h2{font-size:19px;font-weight:600;letter-spacing:-.01em;margin-bottom:10px}
   .section p{color:var(--ink);font-size:15px;max-width:52em;margin-top:10px}
   .section p:first-of-type{margin-top:0}
-  .section.locked p{color:var(--muted);filter:blur(3px);user-select:none}
+  .section.locked p{color:var(--muted);filter:blur(3px);user-select:none;margin-top:8px}
   .section.locked h2::after{content:"— в отчёте";font-size:13px;font-weight:500;color:var(--muted);margin-left:8px}
-  .section .teaser{color:var(--muted);font-size:14px;margin-top:8px;filter:none !important}
+  .section .teaser{color:var(--ink);font-size:15px;margin-top:10px;filter:none !important}
 
   .pricing{border:1px solid var(--ink);background:var(--box);border-radius:8px;padding:22px;margin:22px 0 40px}
   .pricing h3{font-size:18px;font-weight:600;margin-bottom:6px}
   .pricing > p{color:var(--muted);font-size:15px;margin-bottom:16px;max-width:44em}
+  #pricing-top:empty{display:none}
+  #pricing-top{margin:18px 0 0}
   .tiers{display:grid;gap:14px}
   @media (min-width:640px){.tiers{grid-template-columns:1fr 1fr}}
   .tier{border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px}
@@ -131,7 +135,9 @@
   </div>
 
   <div class="preview" id="preview"></div>
+  <p class="preview-note" id="preview-note"></p>
   <div id="score-section"></div>
+  <div class="pricing no-print" id="pricing-top"></div>
   <div class="pdf-row no-print" id="pdf-row" style="display:none">
     <button class="btn-ghost" onclick="window.print()" type="button">Скачать PDF</button>
   </div>
@@ -182,7 +188,7 @@ const TEASER = {
   launch: "Пошаговый план — что делать дальше по пути 0→7.",
 };
 
-// --- Бесплатный тизер ---
+// --- Бесплатный тизер -- реальные данные бесплатной проверки спроса, без ИИ ---
 (function renderPreview(){
   const p = PREVIEW;
   const items = [];
@@ -191,6 +197,12 @@ const TEASER = {
     items.push(`<div class="stat"><b>${p.overall_value}/10</b><span>общая оценка идеи${p.weakest ? ', слабое место — ' + escapeHtml(p.weakest.toLowerCase()) : ''}</span></div>`);
   items.push(`<div class="stat"><b>${p.competitors_count}</b><span>конкурентов уже в выдаче</span></div>`);
   document.getElementById('preview').innerHTML = items.join('');
+
+  const bits = [];
+  if (p.verdict_text) bits.push(escapeHtml(p.verdict_text));
+  if (p.top_competitor_names && p.top_competitor_names.length)
+    bits.push(`Уже в выдаче: <b>${p.top_competitor_names.map(escapeHtml).join(', ')}</b>`);
+  document.getElementById('preview-note').innerHTML = bits.join(' · ');
 })();
 
 // --- Балл жизнеспособности + топ-риски -- видны сразу после разблокировки ---
@@ -226,8 +238,8 @@ sectionsEl.innerHTML = SECTIONS.map(s => {
   }
   return `<section class="section locked" id="sec-${s.key}">
     <h2>${escapeHtml(s.title)}</h2>
-    <p>Полный текст этой секции открывается в отчёте — реальные данные, а не общие слова.</p>
     <div class="teaser">${escapeHtml(TEASER[s.key] || '')}</div>
+    <p>Полный разбор — в отчёте.</p>
   </section>`;
 }).join('');
 
@@ -248,36 +260,45 @@ if (GEN_ERROR) {
   statusEl.style.display = 'block';
 }
 
-// --- Тарифы (если нечего/не всё разблокировано) ---
-const pricing = document.getElementById('pricing');
-function tierCard(key){
+// --- Тарифы (если нечего/не всё разблокировано) -- один и тот же блок
+// сразу после бесплатного тизера И внизу под секциями, чтобы решение о
+// покупке не требовало долистывать весь заблюренный отчёт до конца ---
+const pricingTop = document.getElementById('pricing-top');
+const pricingBottom = document.getElementById('pricing');
+function tierCard(key, suffix){
   const t = PRICES[key];
   return `<div class="tier">
     <div class="name">${escapeHtml(t.label)}</div>
     <div><span class="price">${fmt(t.price)} ₽</span><span class="was">${fmt(t.was)} ₽</span></div>
     <div class="desc">${key === 'quick' ? '4 ключевых раздела: резюме, рынок, конкуренты, вердикт' : 'Все 8 разделов: + аудитория, финансы, риски, план запуска'}</div>
-    <button class="btn" type="button" onclick="order('${key}')">Получить отчёт</button>
+    <button class="btn" type="button" onclick="order('${key}','${suffix}')">Получить отчёт</button>
   </div>`;
 }
-if (UNLOCKED_TIER === 'full') {
-  pricing.style.display = 'none';
-} else if (UNLOCKED_TIER === 'quick') {
-  pricing.innerHTML = `<h3>Докупить <span class="hl">полный отчёт</span></h3>
-    <p>У вас есть быстрый разбор. Полный отчёт добавляет аудиторию, финансовую модель, риски и план запуска.</p>
-    <div class="tiers">${tierCard('full')}</div>
-    <div class="contact-row"><input id="contact" placeholder="Телеграм или почта — куда вернуться с отчётом"></div>
-    <p class="err" id="order-err" role="alert"></p>`;
-} else {
-  pricing.innerHTML = `<h3>Получите <span class="hl">отчёт по идее</span></h3>
+function pricingHTML(suffix){
+  if (UNLOCKED_TIER === 'quick') {
+    return `<h3>Докупить <span class="hl">полный отчёт</span></h3>
+      <p>У вас есть быстрый разбор. Полный отчёт добавляет аудиторию, финансовую модель, риски и план запуска.</p>
+      <div class="tiers">${tierCard('full', suffix)}</div>
+      <div class="contact-row"><input id="contact-${suffix}" placeholder="Телеграм или почта — куда вернуться с отчётом"></div>
+      <p class="err" id="order-err-${suffix}" role="alert"></p>`;
+  }
+  return `<h3>Получите <span class="hl">отчёт по идее</span></h3>
     <p>Не общие слова — разбор на данных, которые мы уже честно посчитали на бесплатной проверке спроса.</p>
-    <div class="tiers">${tierCard('quick')}${tierCard('full')}</div>
-    <div class="contact-row"><input id="contact" placeholder="Телеграм или почта — куда вернуться с отчётом"></div>
-    <p class="err" id="order-err" role="alert"></p>`;
+    <div class="tiers">${tierCard('quick', suffix)}${tierCard('full', suffix)}</div>
+    <div class="contact-row"><input id="contact-${suffix}" placeholder="Телеграм или почта — куда вернуться с отчётом"></div>
+    <p class="err" id="order-err-${suffix}" role="alert"></p>`;
+}
+if (UNLOCKED_TIER === 'full') {
+  pricingTop.style.display = 'none';
+  pricingBottom.style.display = 'none';
+} else {
+  pricingTop.innerHTML = pricingHTML('top');
+  pricingBottom.innerHTML = pricingHTML('bottom');
 }
 
-async function order(tier){
-  const errEl = document.getElementById('order-err');
-  const contact = document.getElementById('contact').value;
+async function order(tier, suffix){
+  const errEl = document.getElementById(`order-err-${suffix}`);
+  const contact = document.getElementById(`contact-${suffix}`).value;
   errEl.classList.remove('show');
   try {
     const r = await fetch('/api/report', {

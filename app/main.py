@@ -337,7 +337,7 @@ async def live_test_order(data: LiveTestIn, request: Request):
         return_url = f"{base}/r/{data.check_id}?paid=1" if data.check_id else f"{base}/?paid=1"
         pid, url = await payments.create_payment(
             order_id, LIVE_TEST_PRICE, f"Создатель · живой тест идеи (заказ {order_id})",
-            return_url, kind="livetest")
+            return_url, kind="livetest", contact=contact)
         with Session(engine) as s:
             order = s.get(LiveTestOrder, order_id)
             order.payment_id = pid; s.add(order); s.commit()
@@ -393,6 +393,7 @@ def _report_preview(demand_data: dict) -> dict:
     known = [f["count"] for f in formulations if f.get("count") is not None]
     top = max(known) if known else None
     comp = demand_data.get("competitors") or {}
+    top_names = [c.get("domain") or c.get("title") or "" for c in (comp.get("top") or [])[:3]]
     return {
         "best_count": top,
         "verdict_text": v.get("text", ""),
@@ -400,6 +401,7 @@ def _report_preview(demand_data: dict) -> dict:
         "overall_value": overall.get("value"),
         "weakest": overall.get("weakest", ""),
         "competitors_count": len(comp.get("top") or []),
+        "top_competitor_names": [n for n in top_names if n],
     }
 
 
@@ -448,7 +450,7 @@ async def report_order(data: ReportIn, request: Request):
         base = str(request.base_url).rstrip("/")
         pid, url = await payments.create_payment(
             order_id, REPORT_PRICES[tier]["price"], f"Создатель · отчёт по идее (заказ {order_id})",
-            f"{base}/report/{data.check_id}?paid=1", kind="report")
+            f"{base}/report/{data.check_id}?paid=1", kind="report", contact=contact)
         with Session(engine) as s:
             order = s.get(ReportPurchase, order_id)
             order.payment_id = pid; s.add(order); s.commit()
