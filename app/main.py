@@ -192,6 +192,11 @@ app = FastAPI(title="Создатель", version="1.0.2", lifespan=_lifespan)
 # аккаунты -- этап внешних пользователей (P2 в VISION).
 OWNER_KEY = os.environ.get("SOZDATEL_OWNER_KEY", "")
 
+# Счётчик Яндекс.Метрики -- не секрет (виден в исходнике любой страницы), но
+# задаётся через env, как и остальная конфигурация проекта: нет ID -- нет
+# вставки кода, дев/тесты работают без счётчика.
+YANDEX_METRIKA_ID = os.environ.get("YANDEX_METRIKA_ID", "")
+
 
 def _check_owner(request: Request) -> None:
     if not OWNER_KEY:
@@ -1062,13 +1067,34 @@ def health_db():
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
 
 
+def _inject_metrika(html: str) -> str:
+    """Код счётчика — в одном месте, а не скопирован в каждый HTML-файл.
+    /l/{id} (проверочные страницы конкретных проектов) сюда не попадают --
+    это чужой трафик по чужой рекламе, не воронка самого Создателя."""
+    if not YANDEX_METRIKA_ID or "</head>" not in html:
+        return html
+    snippet = f"""<script>window.SOZDATEL_YM_ID = {YANDEX_METRIKA_ID};</script>
+<script type="text/javascript">
+    (function(m,e,t,r,i,k,a){{
+        m[i]=m[i]||function(){{(m[i].a=m[i].a||[]).push(arguments)}};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {{if (document.scripts[j].src === r) {{ return; }}}}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+    }})(window, document,'script','https://mc.webvisor.org/metrika/tag_ww.js?id={YANDEX_METRIKA_ID}', 'ym');
+    ym({YANDEX_METRIKA_ID}, 'init', {{ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", trackLinks:true, accurateTrackBounce:true}});
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/{YANDEX_METRIKA_ID}" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+"""
+    return html.replace("</head>", snippet + "</head>", 1)
+
+
 _STATIC_CACHE: dict[str, str] = {}
 
 
 def _static(name: str) -> str:
     """Читаем файл с диска один раз за жизнь процесса."""
     if name not in _STATIC_CACHE:
-        _STATIC_CACHE[name] = (BASE_DIR.parent / "static" / name).read_text()
+        _STATIC_CACHE[name] = _inject_metrika((BASE_DIR.parent / "static" / name).read_text())
     return _STATIC_CACHE[name]
 
 

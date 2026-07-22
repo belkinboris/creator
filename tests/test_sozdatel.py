@@ -1527,3 +1527,40 @@ class TestProjectPage:
         assert "Manrope" not in text and "Onest" not in text and "JetBrains Mono" not in text
         assert "IBM Plex" in text
         assert "#FBF6EA" in text   # фон бумаги, а не --blueprint
+
+
+class TestYandexMetrika:
+    """Счётчик вставляется единой точкой в _static() (см. _inject_metrika),
+    а не копипастой по каждому HTML-файлу. Цели воронки шлются из JS через
+    window.SOZDATEL_YM_ID, который кладёт та же вставка."""
+
+    def test_no_injection_without_id(self, monkeypatch):
+        monkeypatch.setattr(main_module, "YANDEX_METRIKA_ID", "")
+        html = "<html><head><title>т</title></head><body></body></html>"
+        assert main_module._inject_metrika(html) == html
+
+    def test_injects_snippet_with_id(self, monkeypatch):
+        monkeypatch.setattr(main_module, "YANDEX_METRIKA_ID", "12345")
+        html = "<html><head><title>т</title></head><body></body></html>"
+        out = main_module._inject_metrika(html)
+        assert "SOZDATEL_YM_ID = 12345" in out
+        assert "mc.yandex.ru/watch/12345" in out
+        assert out.index("SOZDATEL_YM_ID") < out.index("</head>")
+
+    def test_noop_without_head_tag(self, monkeypatch):
+        monkeypatch.setattr(main_module, "YANDEX_METRIKA_ID", "12345")
+        html = "<div>нет head тега</div>"
+        assert main_module._inject_metrika(html) == html
+
+    def test_demand_started_goal_wired_in_public_entry_points(self):
+        static_dir = main_module.BASE_DIR.parent / "static"
+        for name in ("index.html", "social-contract.html"):
+            text = (static_dir / name).read_text()
+            assert "reachGoal', 'demand_started'" in text, f"нет цели demand_started в {name}"
+
+    def test_report_payment_goals_wired_and_no_reload_loop(self):
+        text = (main_module.BASE_DIR.parent / "static" / "report.html").read_text()
+        assert "report_paid_quick" in text and "report_paid_full" in text
+        # старый баг: условие пускало поллер повторно после reload по quick-тарифу
+        # и страница перезагружалась раз в 2с бесконечно
+        assert "UNLOCKED_TIER !== 'full'" not in text
