@@ -250,19 +250,19 @@
   </section>
 
   <section class="step" data-step="5" id="step-5">
-    <div class="alt-path">
-      <h4>Или получите <span class="hl">отчёт по идее</span> — без ожидания рекламы</h4>
-      <p>Разбор на данных, которые мы уже честно посчитали: рынок, конкуренты, риски, вердикт — за минуты, не дни. От 990 ₽.</p>
-      <a class="btn-ghost" href="/report/__CHECK_ID__">Посмотреть отчёт</a>
-    </div>
     <div class="next" id="order">
       <h3>Дальше — соберём страницу и <span class="hl">скажем, приносит ли идея деньги</span></h3>
       <p>Полностью соберём проверочную страницу под вашу идею — дизайн, тексты, форма заявки — и сами запустим рекламу в Яндексе по <a href="/guide/direct">проверенной схеме</a>, которая обходит типичные ошибки новичков. Через пару недель у вас будут не догадки, а реальные цифры: сколько людей готовы оставить заявку на вашу идею.</p>
       <p class="chosen-note" id="chosen-note"></p>
-      <input id="contact" placeholder="Почта или телефон — на них пришлём чек и результат">
+      <input id="contact" placeholder="Почта или телефон">
       <button class="btn" id="order-btn" type="button"></button>
       <p class="err" id="order-err" role="alert"></p>
       <p class="okmsg" id="order-ok"></p>
+    </div>
+    <div class="alt-path">
+      <h4>Или получите <span class="hl">отчёт по идее</span> — без ожидания рекламы</h4>
+      <p>Разбор на данных, которые мы уже честно посчитали: рынок, конкуренты, риски, вердикт — за минуты, не дни. От 990 ₽.</p>
+      <a class="btn-ghost" href="/report/__CHECK_ID__">Посмотреть отчёт</a>
     </div>
   </section>
 </main>
@@ -469,6 +469,11 @@ const orderBtn = document.getElementById('order-btn');
 orderBtn.textContent = PAY_ENABLED
   ? `Оплатить и запустить — ${fmt(PRICE)} ₽`
   : 'Оставить заявку на живой тест';
+// Чек 54-ФЗ уходит только при реальной оплате -- без кассы это просто
+// заявка для связи, обещать чек в её плейсхолдере было бы неточно.
+document.getElementById('contact').placeholder = PAY_ENABLED
+  ? 'Почта или телефон — для чека'
+  : 'Почта или телефон';
 
 orderBtn.addEventListener('click', async () => {
   const errEl = document.getElementById('order-err');

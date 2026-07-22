@@ -499,7 +499,10 @@ class TestProjectPages:
         assert r.status_code == 200 and "Кабинет" in r.text
         home = client.get("/").text
         assert "Мои проекты" not in home            # кабинет ушёл с главной
-        assert "/desk" in home                      # владельцу — на рабочий стол
+        # Публичная навигация ведёт в кабинет ПОКУПАТЕЛЯ (/account), не владельца
+        # (/desk) -- обычный посетитель не должен упираться в ключ владельца.
+        assert "/account" in home
+        assert "/desk" not in home
 
     def test_verdict_includes_launch_data(self):
         r = client.get("/api/verdict/page_v1", headers=OWNER).json()
@@ -980,8 +983,10 @@ class TestOverallAndStats:
     def test_homepage_declutter_v25(self):
         home = client.get("/").text
         assert "стоит проверка спроса" not in home   # блок цифр снят с витрины
-        assert 'id="press"' in home and "Мы в медиа" in home
-        assert "href=" not in home.split('id="press"')[1].split("</section>")[0]  # пресса пока без ссылок
+        # "Мы в медиа" без реальных ссылок ("добавим позже") читается как
+        # пустое обещание, а не социальное доказательство -- убрали совсем,
+        # вернём, когда появятся настоящие публикации.
+        assert "Мы в медиа" not in home
 
     def test_homepage_has_single_social_proof_number(self):
         """Одна честная живая цифра вместо пустоты — не выдуманный счётчик,
@@ -1866,3 +1871,55 @@ class TestAccountCabinet:
     def test_attach_contact_requires_owner_key(self):
         r = client.patch("/api/projects/whatever/contact", json={"contact": "x@example.com"})
         assert r.status_code == 401
+
+
+class TestCustomerDevPass:
+    """Правки по критическому проходу владельца как customer developer перед
+    запуском рекламы: порядок финального CTA, длина плейсхолдеров на мобильном,
+    /p/{id} без тупика в owner-only /desk, публичная навигация не ведёт в /desk."""
+
+    def test_live_test_cta_comes_before_report_alt_path(self):
+        """"Дальше" -- основной путь, должен идти раньше своей альтернативы
+        ("Или получите отчёт"), иначе "или" читается раньше того, к чему оно
+        относится."""
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "тест", "count": 100}],
+                    "verdict": {"level": "strong", "text": "Спрос есть"},
+                    "competitors": {"found": 10, "top": [{"title": "Т", "domain": "t.ru"}]},
+                    "scores": [{"key": "demand", "label": "Спрос", "value": 7, "note": ""}],
+                    "overall": {"value": 7, "weakest": ""}}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            rid = client.post("/api/demand", json={"idea": "Идея достаточно длинная для проверки порядка CTA"}).json()["id"]
+        finally:
+            m.check_demand = orig
+        text = client.get(f"/r/{rid}").text
+        assert text.index('id="order"') < text.index('class="alt-path"')
+
+    def test_contact_placeholders_short_enough_for_mobile(self):
+        """Длинные плейсхолдеры («Телеграм/почта — на них пришлём чек и
+        результат») визуально обрезались в узком инпуте на мобильном --
+        держим короче того, что реально помещается."""
+        import re
+        for path, static_name in (("static/result.html", "result.html"),
+                                   ("static/report.html", "report.html"),
+                                   ("static/account.html", "account.html")):
+            text = (main_module.BASE_DIR.parent / path).read_text()
+            for m_ in re.finditer(r'placeholder="([^"]*)"', text):
+                assert len(m_.group(1)) <= 30, f"плейсхолдер длиннее 30 символов в {static_name}: {m_.group(1)!r}"
+
+    def test_project_page_has_no_dead_end_to_owner_desk(self):
+        """/p/{id} публичный (не за owner-key) -- личный кабинет покупателя
+        теперь на него ссылается, поэтому свои же "Кабинет →"/"← портфель"
+        не должны вести в /desk, куда у покупателя нет доступа."""
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="no_deadend_v1", product_name="БезТупика")})
+        text = client.get("/p/no_deadend_v1").text
+        assert 'href="/desk"' not in text
+
+    def test_homepage_cabinet_link_points_to_customer_account(self):
+        home = client.get("/").text
+        assert 'href="/account"' in home
+        assert 'href="/desk"' not in home
