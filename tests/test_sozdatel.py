@@ -1697,3 +1697,166 @@ class TestYandexMetrika:
         # старый баг: условие пускало поллер повторно после reload по quick-тарифу
         # и страница перезагружалась раз в 2с бесконечно
         assert "UNLOCKED_TIER !== 'full'" not in text
+
+
+class TestMailer:
+    """SMTP-обёртка -- тот же паттерн инъекции, что payments.py/llm_adapter.py."""
+
+    def test_not_configured_without_env(self, monkeypatch):
+        from app import mailer
+        monkeypatch.delenv("SOZDATEL_SMTP_HOST", raising=False)
+        assert mailer.configured() is False
+
+    def test_configured_with_all_three_env_vars(self, monkeypatch):
+        from app import mailer
+        monkeypatch.setenv("SOZDATEL_SMTP_HOST", "mail.hosting.reg.ru")
+        monkeypatch.setenv("SOZDATEL_SMTP_USER", "noreply@projectsozdatel.ru")
+        monkeypatch.setenv("SOZDATEL_SMTP_PASSWORD", "x")
+        assert mailer.configured() is True
+
+    def test_send_without_config_and_without_injection_raises(self, monkeypatch):
+        from app import mailer
+        monkeypatch.delenv("SOZDATEL_SMTP_HOST", raising=False)
+        with pytest.raises(mailer.MailerError):
+            mailer.send("x@example.com", "тема", "текст")
+
+    def test_send_via_injection(self):
+        from app import mailer
+        captured = {}
+        def fake_send(msg):
+            captured["to"] = msg["To"]; captured["subject"] = msg["Subject"]
+            captured["body"] = msg.get_content()
+        mailer.send("user@example.com", "Вход", "текст письма", _send=fake_send)
+        assert captured["to"] == "user@example.com"
+        assert captured["subject"] == "Вход"
+        assert "текст письма" in captured["body"]
+
+
+class TestAccountCabinet:
+    """Личный кабинет покупателя: magic-link на почту вместо пароля."""
+
+    def test_request_link_rejects_bad_email(self):
+        r = client.post("/api/account/request-link", json={"contact": "@telegram_handle"})
+        assert r.status_code == 400
+
+    def test_request_link_503_when_mailer_not_configured(self, monkeypatch):
+        import app.main as m
+        monkeypatch.setattr(m.mailer, "configured", lambda: False)
+        r = client.post("/api/account/request-link", json={"contact": "user@example.com"})
+        assert r.status_code == 503
+
+    def test_request_link_sends_email_with_token_url(self, monkeypatch):
+        import app.main as m
+        monkeypatch.setattr(m.mailer, "configured", lambda: True)
+        captured = {}
+        def fake_send(to, subject, body, **kw):
+            captured["to"] = to; captured["body"] = body
+        monkeypatch.setattr(m.mailer, "send", fake_send)
+        r = client.post("/api/account/request-link", json={"contact": "User@Example.com"})
+        assert r.status_code == 200 and r.json()["ok"] is True
+        assert captured["to"] == "user@example.com"   # нормализуем регистр
+        assert "/account/verify?token=" in captured["body"]
+
+    def test_request_link_surfaces_mailer_error(self, monkeypatch):
+        import app.main as m
+        from app.mailer import MailerError
+        monkeypatch.setattr(m.mailer, "configured", lambda: True)
+        def failing(to, subject, body, **kw):
+            raise MailerError("Не получилось отправить письмо. Попробуйте ещё раз через минуту.")
+        monkeypatch.setattr(m.mailer, "send", failing)
+        r = client.post("/api/account/request-link", json={"contact": "user@example.com"})
+        assert r.status_code == 502
+
+    def _issue_session(self, monkeypatch, contact):
+        """Создаёт magic-link токен напрямую в БД и проходит верификацию --
+        короче, чем гонять письмо через инъекцию ради одного токена."""
+        import app.main as m
+        from app.main import MagicLinkToken, Session, engine
+        with Session(engine) as s:
+            s.add(MagicLinkToken(token="tok_" + contact, contact=contact))
+            s.commit()
+        r = client.get(f"/account/verify?token=tok_{contact}", follow_redirects=False)
+        assert r.status_code in (302, 307)
+        return r.cookies.get("sozdatel_session")
+
+    def test_verify_rejects_unknown_token(self):
+        r = client.get("/account/verify?token=does-not-exist", follow_redirects=False)
+        assert r.status_code == 400
+
+    def test_verify_rejects_reused_token(self, monkeypatch):
+        session_token = self._issue_session(monkeypatch, "reuse@example.com")
+        assert session_token
+        # тот же токен второй раз -- уже использован
+        r = client.get("/account/verify?token=tok_reuse@example.com", follow_redirects=False)
+        assert r.status_code == 400
+        client.cookies.clear()
+
+    def test_verify_rejects_expired_token(self, monkeypatch):
+        import app.main as m
+        from app.main import MagicLinkToken, Session, engine, utcnow
+        from datetime import timedelta
+        with Session(engine) as s:
+            s.add(MagicLinkToken(token="tok_expired", contact="old@example.com",
+                                 created_at=utcnow() - timedelta(minutes=m.MAGIC_LINK_TTL_MINUTES + 1)))
+            s.commit()
+        r = client.get("/account/verify?token=tok_expired", follow_redirects=False)
+        assert r.status_code == 400
+
+    def test_me_without_cookie_returns_no_contact(self):
+        client.cookies.clear()
+        r = client.get("/api/account/me")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["contact"] is None and d["projects"] == [] and d["reports"] == []
+
+    def test_me_lists_only_this_contacts_projects_and_paid_reports(self, monkeypatch):
+        import app.main as m
+        from app.main import SmokeProject, ReportPurchase, Session, engine
+        contact = "cabinet_test@example.com"
+        with Session(engine) as s:
+            s.add(SmokeProject(idea_id="cab_proj_v1", product_name="КабинетТест",
+                               idea_text="т", offer_json="{}", landing_html="<title></title>",
+                               contact=contact))
+            s.add(SmokeProject(idea_id="cab_proj_other_v1", product_name="ЧужойПроект",
+                               idea_text="т", offer_json="{}", landing_html="<title></title>",
+                               contact="other@example.com"))
+            s.add(ReportPurchase(idea="идея с отчётом", tier="full", contact=contact,
+                                 status="paid", check_id=None))
+            s.add(ReportPurchase(idea="неоплаченный", tier="quick", contact=contact,
+                                 status="pending_payment", check_id=None))
+            s.commit()
+
+        session_token = self._issue_session(monkeypatch, contact)
+        client.cookies.set("sozdatel_session", session_token)
+        r = client.get("/api/account/me")
+        client.cookies.clear()
+        assert r.status_code == 200
+        d = r.json()
+        assert d["contact"] == contact
+        assert [p["idea_id"] for p in d["projects"]] == ["cab_proj_v1"]
+        assert len(d["reports"]) == 1 and d["reports"][0]["idea"] == "идея с отчётом"
+
+    def test_logout_clears_cookie(self):
+        r = client.post("/api/account/logout")
+        assert r.status_code == 200
+        assert r.cookies.get("sozdatel_session") is None
+
+    def test_account_page_loads(self):
+        r = client.get("/account")
+        assert r.status_code == 200
+        assert "Личный" in r.text
+
+    def test_owner_can_attach_contact_to_project(self):
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="contact_attach_v1", product_name="ПрикреплениеКонтакта")})
+        r = client.patch("/api/projects/contact_attach_v1/contact", headers=OWNER,
+                         json={"contact": "attached@example.com"})
+        assert r.status_code == 200
+        from app.main import SmokeProject, Session, engine, select
+        with Session(engine) as s:
+            proj = s.exec(select(SmokeProject).where(SmokeProject.idea_id == "contact_attach_v1")).first()
+            assert proj.contact == "attached@example.com"
+
+    def test_attach_contact_requires_owner_key(self):
+        r = client.patch("/api/projects/whatever/contact", json={"contact": "x@example.com"})
+        assert r.status_code == 401

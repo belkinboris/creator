@@ -24,13 +24,15 @@ import html
 import json
 import logging
 import os
+import re
+import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
@@ -59,6 +61,7 @@ from app.report_engine import (  # noqa: E402
     ReportEngineError, generate_report, ALL_SECTIONS, QUICK_KEYS,
 )
 from app import payments  # noqa: E402
+from app import mailer  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sozdatel")
@@ -85,6 +88,7 @@ class SmokeProject(SQLModel, table=True):
     lead_rate_dead: float = 0.04
     status: str = "running"  # running | signal | dead | gray
     created_at: datetime = Field(default_factory=utcnow)
+    contact: str = ""        # почта покупателя -- показывается в его личном кабинете (/account)
 
 
 # Единая шкала пути 0..7 -- те же названия на главной, в кабинете и в API.
@@ -143,6 +147,26 @@ class ReportPurchase(SQLModel, table=True):
     report_json: str = ""     # заполняется лениво после оплаты
 
 
+class MagicLinkToken(SQLModel, table=True):
+    """Одноразовая ссылка входа в /account -- письмом на contact, без пароля.
+    Короткий срок жизни (см. MAGIC_LINK_TTL_MINUTES): это только подтверждение
+    почты, долгую сессию после перехода по ссылке несёт AccountSession."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    token: str = Field(index=True, unique=True)
+    contact: str
+    created_at: datetime = Field(default_factory=utcnow)
+    used: bool = False
+
+
+class AccountSession(SQLModel, table=True):
+    """Долгая сессия после перехода по magic-link -- токен лежит в cookie
+    браузера, contact ищется по нему при каждом заходе на /account."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    token: str = Field(index=True, unique=True)
+    contact: str
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class SmokeEvent(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     idea: str = Field(index=True)
@@ -161,6 +185,7 @@ try:  # create_all не добавляет колонки в существую�
     with engine.connect() as _c:
         _c.execute(_sqltext("ALTER TABLE demandcheck ADD COLUMN IF NOT EXISTS result_json VARCHAR DEFAULT ''"))
         _c.execute(_sqltext("ALTER TABLE livetestorder ADD COLUMN IF NOT EXISTS chosen_offer VARCHAR DEFAULT ''"))
+        _c.execute(_sqltext("ALTER TABLE smokeproject ADD COLUMN IF NOT EXISTS contact VARCHAR DEFAULT ''"))
         _c.commit()
 except Exception:  # sqlite в тестах создаёт таблицу сразу с колонкой -- это норма
     pass
@@ -175,7 +200,7 @@ async def _lifespan(_app: FastAPI):
     except Exception:
         logger.exception("warm-up db failed (non-fatal)")
     for name in ("index.html", "portfolio.html", "project.html", "guide-direct.html", "result.html", "report.html",
-                 "social-contract.html"):
+                 "social-contract.html", "account.html"):
         try:
             _static(name)
         except Exception:
@@ -798,6 +823,26 @@ def rename_project(idea_id: str, data: RenameIn, request: Request):
     return {"ok": True, "name": name}
 
 
+class ProjectContactIn(BaseModel):
+    contact: str
+
+
+@app.patch("/api/projects/{idea_id}/contact")
+def set_project_contact(idea_id: str, data: ProjectContactIn, request: Request):
+    """Привязка проекта к покупателю -- владелец делает это вручную при
+    запуске (см. «Заявки на живой тест» в кабинете), чтобы проект появился
+    в личном кабинете покупателя (/account) по этой почте."""
+    _check_owner(request)
+    contact = data.contact.strip()[:200]
+    with Session(engine) as s:
+        proj = s.exec(select(SmokeProject).where(SmokeProject.idea_id == idea_id)).first()
+        if proj is None:
+            raise HTTPException(404, "проект не найден")
+        proj.contact = contact
+        s.add(proj); s.commit()
+    return {"ok": True, "contact": contact}
+
+
 @app.delete("/api/projects/{idea_id}")
 def delete_project(idea_id: str, request: Request):
     """Удалить заброшенный лендинг: сам проект + его события (контакты лидов
@@ -993,6 +1038,105 @@ async def waitlist(data: WaitlistIn, request: Request):
         s.add(SmokeEvent(idea="sozdatel_waitlist", event="lead_submitted", contact=contact))
         s.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Личный кабинет покупателя: вход по magic-link на почту, без пароля.
+# contact уже обязателен для чека оплаты (см. payments.valid_receipt_contact) --
+# письмо со ссылкой входа шлётся именно на него, отдельной учётки не нужно.
+# ---------------------------------------------------------------------------
+
+SESSION_COOKIE = "sozdatel_session"
+MAGIC_LINK_TTL_MINUTES = 30
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class AccountLinkIn(BaseModel):
+    contact: str
+
+
+@app.post("/api/account/request-link")
+async def account_request_link(data: AccountLinkIn, request: Request):
+    contact = data.contact.strip().lower()
+    if not _EMAIL_RE.match(contact):
+        return JSONResponse({"ok": False, "error": "Введите почту, на которую оформляли заказ."}, status_code=400)
+    if not mailer.configured():
+        return JSONResponse({"ok": False, "error": "Вход по почте пока не настроен на сервере."}, status_code=503)
+
+    token = secrets.token_urlsafe(32)
+    with Session(engine) as s:
+        s.add(MagicLinkToken(token=token, contact=contact))
+        s.commit()
+    base = str(request.base_url).rstrip("/")
+    link = f"{base}/account/verify?token={token}"
+    body = (f"Ссылка для входа в личный кабинет Создателя (действует {MAGIC_LINK_TTL_MINUTES} минут):\n{link}\n\n"
+            "Если вы не запрашивали вход — просто проигнорируйте это письмо.")
+    try:
+        mailer.send(contact, "Вход в личный кабинет — Создатель", body)
+    except mailer.MailerError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+    return {"ok": True, "message": "Если эта почта известна нам, письмо со ссылкой уже отправлено."}
+
+
+@app.get("/account/verify")
+def account_verify(token: str):
+    with Session(engine) as s:
+        link = s.exec(select(MagicLinkToken).where(MagicLinkToken.token == token)).first()
+        if (not link or link.used
+                or link.created_at < utcnow() - timedelta(minutes=MAGIC_LINK_TTL_MINUTES)):
+            return HTMLResponse(
+                "<p>Ссылка недействительна или устарела. "
+                '<a href="/account">Запросите новую</a>.</p>', status_code=400)
+        link.used = True
+        s.add(link)
+        session_token = secrets.token_urlsafe(32)
+        s.add(AccountSession(token=session_token, contact=link.contact))
+        s.commit()
+    resp = RedirectResponse(url="/account")
+    resp.set_cookie(SESSION_COOKIE, session_token, max_age=180 * 24 * 3600,
+                     httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/api/account/logout")
+def account_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+
+def _current_contact(request: Request) -> Optional[str]:
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    with Session(engine) as s:
+        sess = s.exec(select(AccountSession).where(AccountSession.token == token)).first()
+        return sess.contact if sess else None
+
+
+@app.get("/api/account/me")
+def account_me(request: Request):
+    contact = _current_contact(request)
+    if not contact:
+        return {"ok": True, "contact": None, "projects": [], "reports": []}
+    with Session(engine) as s:
+        projects = s.exec(select(SmokeProject).where(SmokeProject.contact == contact)
+                          .order_by(SmokeProject.created_at.desc())).all()
+        reports = s.exec(select(ReportPurchase).where(
+            ReportPurchase.contact == contact, ReportPurchase.status == "paid"
+        ).order_by(ReportPurchase.created_at.desc())).all()
+    return {
+        "ok": True, "contact": contact,
+        "projects": [{"idea_id": p.idea_id, "product_name": p.product_name,
+                      "project_url": f"/p/{p.idea_id}"} for p in projects],
+        "reports": [{"check_id": r.check_id, "idea": r.idea, "tier": r.tier,
+                     "report_url": f"/report/{r.check_id}"} for r in reports],
+    }
+
+
+@app.get("/account", response_class=HTMLResponse)
+def account_page():
+    return HTMLResponse(_static("account.html"))
 
 
 @app.get("/legal", response_class=HTMLResponse)
