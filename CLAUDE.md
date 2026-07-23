@@ -18,10 +18,12 @@
 | `app/llm_adapter.py` | Абстракция LLM: Yandex (DeepSeek, по умолчанию) / Anthropic |
 | `app/offer_engine.py` | Этап 0: идея → 3 заточенных предложения (LLM) |
 | `app/demand.py` | Этап 1: проверка спроса (два пути Wordstat + Search API + LLM-оценка) |
-| `app/payments.py` | Интеграция YooKassa (опционально) |
+| `app/payments.py` | Интеграция YooKassa (опционально); чек 54-ФЗ обязателен -- см. `valid_receipt_contact` |
+| `app/mailer.py` | SMTP (reg.ru Mail-1) -- письмо со ссылкой входа в `/account`, без пароля |
 | `app/landing_template.html` | Шаблон дымовой посадочной страницы (слоты `{{PRODUCT_NAME}}` и др.) |
 | `static/index.html` | Публичная главная страница |
 | `static/desk.html` | Кабинет владельца (за паролем) |
+| `static/account.html` | Личный кабинет покупателя (`/account`) -- magic-link по почте, список проектов/отчётов |
 | `static/project.html` | Страница проекта: график, инструкция Яндекс.Директ |
 | `static/result.html` | Страница результата проверки спроса `/r/<id>` — лента с прогрессивным раскрытием |
 | `static/guide-direct.html` | Плейбук запуска Яндекс Директа без автопилота (этап 4 из 8) |
@@ -96,6 +98,17 @@
   (`YANDEX_API_KEY`/`YANDEX_FOLDER_ID`). Это два разных продукта Яндекса, не
   синонимы. При жалобе «нет данных» — сначала `GET /api/diag/yandex?key=...`
   (owner-only): покажет сырой ответ обоих путей вместо гадания.
+- ЮКасса требует чек (54-ФЗ) с `customer.email`/`customer.phone` — контакт
+  из формы обязан быть почтой/телефоном для платных заказов (см.
+  `payments.valid_receipt_contact`); телеграм-хэндл проходит только в
+  заявку без оплаты (без настроенной кассы).
+- Личный кабинет покупателя (`/account`) — вход по magic-link на почту, без
+  пароля (`app/mailer.py`, SMTP reg.ru Mail-1). Нужны env:
+  `SOZDATEL_SMTP_HOST`, `SOZDATEL_SMTP_PORT` (465), `SOZDATEL_SMTP_USER`,
+  `SOZDATEL_SMTP_PASSWORD`. `SmokeProject.contact` не проставляется
+  автоматически — владелец привязывает вручную через
+  `PATCH /api/projects/{idea_id}/contact` при запуске проекта под оплаченную
+  заявку живого теста.
 
 ## Roadmap
 

@@ -118,8 +118,9 @@
   .sharp-card h4{font-size:16px;font-weight:600;letter-spacing:-.01em}
   .sharp-card h4 em{font-style:normal;background:linear-gradient(transparent 58%, var(--marker) 58%);padding:0 2px}
   .sharp-card p{color:var(--muted);font-size:14px}
+  .sharp-audience{color:var(--ink) !important;font-size:14px}
+  .sharp-audience b,.sharp-pain b{font-weight:600}
   .sharp-pain{color:var(--ink) !important}
-  .sharp-pain b{font-weight:600}
   .sharp-pick{appearance:none;cursor:pointer;border-radius:6px;margin-top:auto;align-self:flex-start;
     background:transparent;border:1px solid var(--line);color:var(--ink);
     font:500 14px "IBM Plex Sans";padding:9px 14px}
@@ -143,7 +144,7 @@
   .next input{width:100%;padding:11px 12px;border:1px solid var(--line);
     border-radius:6px;background:#fff;color:var(--ink);font:inherit;margin-bottom:10px}
   .btn{appearance:none;border:0;cursor:pointer;border-radius:6px;display:inline-block;
-    background:var(--btn);color:#fff;font:600 15px "IBM Plex Sans";padding:11px 18px}
+    background:var(--btn);color:#fff;font:600 15px "IBM Plex Sans";padding:11px 18px;text-decoration:none}
   .btn:hover{background:#000}
   .btn[disabled]{opacity:.55;cursor:wait}
   .err{display:none;margin-top:10px;color:var(--bad);font-size:15px}
@@ -206,8 +207,20 @@
 
   <section class="step" data-step="2" id="step-2">
     <div class="step-summary" onclick="reopen(2)">
-      <span class="step-summary-title"><span class="ok-mark">✓</span>Оценка идеи</span>
+      <span class="step-summary-title"><span class="ok-mark">✓</span>Конкуренты</span>
       <span class="step-summary-detail" id="sum-2"></span>
+    </div>
+    <div class="step-body">
+      <div class="step-title">Конкуренты</div>
+      <div id="comps"></div>
+      <div class="step-next"><button class="btn" type="button" onclick="advance(2)" id="step2-next"></button></div>
+    </div>
+  </section>
+
+  <section class="step" data-step="3" id="step-3">
+    <div class="step-summary" onclick="reopen(3)">
+      <span class="step-summary-title"><span class="ok-mark">✓</span>Оценка идеи</span>
+      <span class="step-summary-detail" id="sum-3"></span>
     </div>
     <div class="step-body">
       <div class="step-title">Оценка идеи</div>
@@ -217,19 +230,7 @@
       </div>
       <button class="detail-toggle" id="score-detail-toggle" type="button">Почему такая оценка? →</button>
       <div class="score-grid" id="scores" hidden></div>
-      <div class="step-next"><button class="btn" type="button" onclick="advance(2)" id="step2-next"></button></div>
-    </div>
-  </section>
-
-  <section class="step" data-step="3" id="step-3">
-    <div class="step-summary" onclick="reopen(3)">
-      <span class="step-summary-title"><span class="ok-mark">✓</span>Кто уже отвечает на этот спрос</span>
-      <span class="step-summary-detail" id="sum-3"></span>
-    </div>
-    <div class="step-body">
-      <div class="step-title">Кто уже отвечает на этот спрос</div>
-      <div id="comps"></div>
-      <div class="step-next"><button class="btn" type="button" onclick="advance(3)">Дальше — заострим идею →</button></div>
+      <div class="step-next"><button class="btn" type="button" onclick="advance(3)" id="step3-next"></button></div>
     </div>
   </section>
 
@@ -249,19 +250,19 @@
   </section>
 
   <section class="step" data-step="5" id="step-5">
-    <div class="alt-path">
-      <h4>Или получите <span class="hl">отчёт по идее</span> — без ожидания рекламы</h4>
-      <p>Разбор на данных, которые мы уже честно посчитали: рынок, конкуренты, риски, вердикт — за минуты, не дни. От 990 ₽.</p>
-      <a class="btn-ghost" href="/report/__CHECK_ID__">Посмотреть отчёт</a>
-    </div>
     <div class="next" id="order">
       <h3>Дальше — соберём страницу и <span class="hl">скажем, приносит ли идея деньги</span></h3>
-      <p>Полностью соберём проверочную страницу под вашу идею — дизайн, тексты, форма заявки — и сами запустим рекламу в Яндексе по <a href="/guide/direct">проверенной схеме</a>, которая обходит типичные ошибки новичков. Через пару недель у вас будут не догадки, а реальные цифры: сколько людей готовы оставить заявку на вашу идею.</p>
+      <p>Полностью соберём проверочную страницу под вашу идею — дизайн, тексты, форма заявки. Дальше вы сами запускаете рекламу в Яндекс Директе — у нас есть <a href="/guide/direct">пошаговая инструкция</a>, которая обходит типичные ошибки новичков, а мы посчитаем цифры, которые она приведёт. Через пару недель у вас будут не догадки, а реальные цифры: сколько людей готовы оставить заявку на вашу идею.</p>
       <p class="chosen-note" id="chosen-note"></p>
-      <input id="contact" placeholder="Телеграм или почта — куда вернуться с результатом">
+      <input id="contact" placeholder="Почта или телефон">
       <button class="btn" id="order-btn" type="button"></button>
       <p class="err" id="order-err" role="alert"></p>
       <p class="okmsg" id="order-ok"></p>
+    </div>
+    <div class="alt-path">
+      <h4>Или получите <span class="hl">отчёт по идее</span> — без ожидания рекламы</h4>
+      <p>Разбор на данных, которые мы уже честно посчитали: рынок, конкуренты, риски, вердикт — за минуты, не дни. От 990 ₽.</p>
+      <a class="btn" href="/report/__CHECK_ID__">Посмотреть отчёт</a>
     </div>
   </section>
 </main>
@@ -294,7 +295,7 @@ document.getElementById('freqs').innerHTML = (DATA.formulations||[]).map(f => `
   <div class="freq-row">
     <span>${escapeHtml(f.phrase)}</span>
     <span>${f.count === null
-      ? '<span class="freq-num na">нет данных</span>'
+      ? '<span class="freq-num na">почти не ищут</span>'
       : `<span class="freq-num">${fmt(f.count)}</span><span class="freq-unit">запросов/мес</span>`}
     </span>
   </div>`).join('');
@@ -316,7 +317,7 @@ if (hasScores) {
   document.getElementById('scores').innerHTML = sc.map(s => `
     <div class="score-cell">
       ${s.value === null
-        ? `<div class="score-val na">нет данных</div>`
+        ? `<div class="score-val na">почти не ищут</div>`
         : `<div><span class="score-val">${escapeHtml(String(s.value))}</span><span class="score-max">/10</span></div>`}
       <div class="score-label">${escapeHtml(s.label)}</div>
       <div class="score-note">${escapeHtml(s.note || (s.value === null ? 'Частотность недоступна — проверьте формулировки в Вордстате вручную.' : ''))}</div>
@@ -347,8 +348,8 @@ if (new URLSearchParams(location.search).get('paid') === '1') {
 
 // --- Лента: один активный фокус, шаги без данных пропускаются целиком ---
 
-const ARRIVAL = {2: 'оценка идеи', 3: 'кто уже на этом рынке', 4: 'заострим идею', 5: 'живой тест'};
-const STEP_ORDER = [1, hasScores ? 2 : null, hasComp ? 3 : null, 4, 5].filter(Boolean);
+const ARRIVAL = {2: 'конкуренты', 3: 'оценка идеи', 4: 'заострим идею', 5: 'живой тест'};
+const STEP_ORDER = [1, hasComp ? 2 : null, hasScores ? 3 : null, 4, 5].filter(Boolean);
 
 function nextLabel(afterStep){
   const pos = STEP_ORDER.indexOf(afterStep);
@@ -356,7 +357,8 @@ function nextLabel(afterStep){
   return next ? `Дальше — ${ARRIVAL[next]} →` : 'Дальше →';
 }
 document.getElementById('step1-next').textContent = nextLabel(1);
-if (hasScores) document.getElementById('step2-next').textContent = nextLabel(2);
+if (hasComp) document.getElementById('step2-next').textContent = nextLabel(2);
+if (hasScores) document.getElementById('step3-next').textContent = nextLabel(3);
 
 function summarizeStep1(){
   const known = (DATA.formulations||[]).filter(f => f.count !== null);
@@ -365,13 +367,13 @@ function summarizeStep1(){
   return top !== null ? `${fmt(top)} запросов/мес — ${label}` : label;
 }
 function summarizeStep2(){
-  const ov = DATA.overall;
-  return ov && ov.value !== null ? `${ov.value}/10${ov.weakest ? ', слабое место — ' + ov.weakest.toLowerCase() : ''}` : '';
-}
-function summarizeStep3(){
   if (!hasComp) return '';
   const names = comp.top.slice(0, 2).map(c => serviceName(c.domain)).join(', ');
   return comp.found ? `${fmt(comp.found)} страниц, топ — ${names}` : `топ — ${names}`;
+}
+function summarizeStep3(){
+  const ov = DATA.overall;
+  return ov && ov.value !== null ? `${ov.value}/10${ov.weakest ? ', слабое место — ' + ov.weakest.toLowerCase() : ''}` : '';
 }
 
 function openStep(n){
@@ -417,14 +419,18 @@ function skipSharpen(){
 }
 
 function pickOffer(offer, btn){
-  chosenOffer = {angle: offer.angle || '', h1: stripTags(offer.h1), sub: offer.sub || ''};
+  // Полный оффер, не только angle/h1/sub -- это единственное, что позволяет
+  // запустить проект сразу при оплате, без ручного вмешательства владельца
+  // (см. LAUNCH_REQUIRED_FIELDS и автозапуск в yookassa_webhook).
+  chosenOffer = offer;
   sharpenCards.querySelectorAll('.sharp-card').forEach(c => c.classList.remove('picked'));
   sharpenCards.querySelectorAll('.sharp-pick').forEach(b => { b.textContent = 'Выбрать этот вариант'; });
   btn.closest('.sharp-card').classList.add('picked');
   btn.textContent = 'Выбрано ✓';
-  chosenNote.textContent = 'Тестируем: ' + chosenOffer.h1;
+  const displayH1 = stripTags(offer.h1);
+  chosenNote.textContent = 'Тестируем: ' + displayH1;
   chosenNote.classList.add('show');
-  advance(4, 'Выбрано: ' + chosenOffer.h1);
+  advance(4, 'Выбрано: ' + displayH1);
 }
 
 function renderSharpen(offers){
@@ -432,8 +438,9 @@ function renderSharpen(offers){
     <div class="sharp-card" data-i="${i}">
       <div class="sharp-angle">${escapeHtml(o.angle || '')}</div>
       <h4>${o.h1 || ''}</h4>
+      ${o.eyebrow ? `<p class="sharp-audience"><b>Для кого:</b> ${escapeHtml(o.eyebrow)}</p>` : ''}
       <p>${escapeHtml(o.sub || '')}</p>
-      ${o.pains && o.pains[0] ? `<p class="sharp-pain"><b>${escapeHtml(o.pains[0].h2 || '')}</b> — ${escapeHtml(o.pains[0].p || '')}</p>` : ''}
+      ${o.pains && o.pains[0] ? `<p class="sharp-pain"><b>Боль:</b> ${escapeHtml(o.pains[0].h2 || '')} — ${escapeHtml(o.pains[0].p || '')}</p>` : ''}
       <button class="sharp-pick" type="button">Выбрать этот вариант</button>
     </div>`).join('');
   sharpenCards.classList.add('show');
@@ -466,6 +473,11 @@ const orderBtn = document.getElementById('order-btn');
 orderBtn.textContent = PAY_ENABLED
   ? `Оплатить и запустить — ${fmt(PRICE)} ₽`
   : 'Оставить заявку на живой тест';
+// Чек 54-ФЗ уходит только при реальной оплате -- без кассы это просто
+// заявка для связи, обещать чек в её плейсхолдере было бы неточно.
+document.getElementById('contact').placeholder = PAY_ENABLED
+  ? 'Почта или телефон — для чека'
+  : 'Почта или телефон';
 
 orderBtn.addEventListener('click', async () => {
   const errEl = document.getElementById('order-err');

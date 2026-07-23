@@ -150,7 +150,6 @@
     </aside>
     <div>
       <div id="sections"></div>
-      <div class="pricing no-print" id="pricing"></div>
     </div>
   </div>
 </main>
@@ -192,14 +191,18 @@ const TEASER = {
 (function renderPreview(){
   const p = PREVIEW;
   const items = [];
-  items.push(`<div class="stat"><b>${p.best_count !== null ? fmt(p.best_count) + '/мес' : 'нет данных'}</b><span>частотность лучшей формулировки</span></div>`);
+  items.push(`<div class="stat"><b>${p.best_count !== null ? fmt(p.best_count) + '/мес' : 'почти не ищут'}</b><span>частотность лучшей формулировки</span></div>`);
   if (p.overall_value !== null && p.overall_value !== undefined)
     items.push(`<div class="stat"><b>${p.overall_value}/10</b><span>общая оценка идеи${p.weakest ? ', слабое место — ' + escapeHtml(p.weakest.toLowerCase()) : ''}</span></div>`);
   items.push(`<div class="stat"><b>${p.competitors_count}</b><span>конкурентов уже в выдаче</span></div>`);
   document.getElementById('preview').innerHTML = items.join('');
 
   const bits = [];
-  if (p.verdict_text) bits.push(escapeHtml(p.verdict_text));
+  // При слабом сигнале спроса вердикт советует "переформулируйте идею" --
+  // здесь это уже неактуально: если человек дошёл до покупки отчёта, он,
+  // скорее всего, уже заострил идею на бесплатном шаге. Повторять совет
+  // "попробуйте сузить" не нужно, показываем только положительные вердикты.
+  if (p.verdict_text && p.verdict_level !== 'weak') bits.push(escapeHtml(p.verdict_text));
   if (p.top_competitor_names && p.top_competitor_names.length)
     bits.push(`Уже в выдаче: <b>${p.top_competitor_names.map(escapeHtml).join(', ')}</b>`);
   document.getElementById('preview-note').innerHTML = bits.join(' · ');
@@ -260,45 +263,39 @@ if (GEN_ERROR) {
   statusEl.style.display = 'block';
 }
 
-// --- Тарифы (если нечего/не всё разблокировано) -- один и тот же блок
-// сразу после бесплатного тизера И внизу под секциями, чтобы решение о
-// покупке не требовало долистывать весь заблюренный отчёт до конца ---
-const pricingTop = document.getElementById('pricing-top');
-const pricingBottom = document.getElementById('pricing');
-function tierCard(key, suffix){
+// --- Тарифы (если нечего/не всё разблокировано) -- сразу после бесплатного
+// тизера, чтобы решение о покупке не требовало долистывать весь заблюренный
+// отчёт до конца. Один блок, не два -- дублирование того же предложения
+// внизу под секциями ощущалось лишним после того, как цена уже видна сверху.
+const pricing = document.getElementById('pricing-top');
+function tierCard(key){
   const t = PRICES[key];
   return `<div class="tier">
     <div class="name">${escapeHtml(t.label)}</div>
     <div><span class="price">${fmt(t.price)} ₽</span><span class="was">${fmt(t.was)} ₽</span></div>
     <div class="desc">${key === 'quick' ? '4 ключевых раздела: резюме, рынок, конкуренты, вердикт' : 'Все 8 разделов: + аудитория, финансы, риски, план запуска'}</div>
-    <button class="btn" type="button" onclick="order('${key}','${suffix}')">Получить отчёт</button>
+    <button class="btn" type="button" onclick="order('${key}')">Получить отчёт</button>
   </div>`;
 }
-function pricingHTML(suffix){
-  if (UNLOCKED_TIER === 'quick') {
-    return `<h3>Докупить <span class="hl">полный отчёт</span></h3>
-      <p>У вас есть быстрый разбор. Полный отчёт добавляет аудиторию, финансовую модель, риски и план запуска.</p>
-      <div class="tiers">${tierCard('full', suffix)}</div>
-      <div class="contact-row"><input id="contact-${suffix}" placeholder="Телеграм или почта — куда вернуться с отчётом"></div>
-      <p class="err" id="order-err-${suffix}" role="alert"></p>`;
-  }
-  return `<h3>Получите <span class="hl">отчёт по идее</span></h3>
-    <p>Не общие слова — разбор на данных, которые мы уже честно посчитали на бесплатной проверке спроса.</p>
-    <div class="tiers">${tierCard('quick', suffix)}${tierCard('full', suffix)}</div>
-    <div class="contact-row"><input id="contact-${suffix}" placeholder="Телеграм или почта — куда вернуться с отчётом"></div>
-    <p class="err" id="order-err-${suffix}" role="alert"></p>`;
-}
 if (UNLOCKED_TIER === 'full') {
-  pricingTop.style.display = 'none';
-  pricingBottom.style.display = 'none';
+  pricing.style.display = 'none';
+} else if (UNLOCKED_TIER === 'quick') {
+  pricing.innerHTML = `<h3>Докупить <span class="hl">полный отчёт</span></h3>
+    <p>У вас есть быстрый разбор. Полный отчёт добавляет аудиторию, финансовую модель, риски и план запуска.</p>
+    <div class="tiers">${tierCard('full')}</div>
+    <div class="contact-row"><input id="contact" placeholder="Почта или телефон — для чека"></div>
+    <p class="err" id="order-err" role="alert"></p>`;
 } else {
-  pricingTop.innerHTML = pricingHTML('top');
-  pricingBottom.innerHTML = pricingHTML('bottom');
+  pricing.innerHTML = `<h3>Получите <span class="hl">отчёт по идее</span></h3>
+    <p>Не общие слова — разбор на данных, которые мы уже честно посчитали на бесплатной проверке спроса.</p>
+    <div class="tiers">${tierCard('quick')}${tierCard('full')}</div>
+    <div class="contact-row"><input id="contact" placeholder="Почта или телефон — для чека"></div>
+    <p class="err" id="order-err" role="alert"></p>`;
 }
 
-async function order(tier, suffix){
-  const errEl = document.getElementById(`order-err-${suffix}`);
-  const contact = document.getElementById(`contact-${suffix}`).value;
+async function order(tier){
+  const errEl = document.getElementById('order-err');
+  const contact = document.getElementById('contact').value;
   errEl.classList.remove('show');
   try {
     const r = await fetch('/api/report', {

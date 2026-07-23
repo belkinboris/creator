@@ -499,7 +499,10 @@ class TestProjectPages:
         assert r.status_code == 200 and "Кабинет" in r.text
         home = client.get("/").text
         assert "Мои проекты" not in home            # кабинет ушёл с главной
-        assert "/desk" in home                      # владельцу — на рабочий стол
+        # Публичная навигация ведёт в кабинет ПОКУПАТЕЛЯ (/account), не владельца
+        # (/desk) -- обычный посетитель не должен упираться в ключ владельца.
+        assert "/account" in home
+        assert "/desk" not in home
 
     def test_verdict_includes_launch_data(self):
         r = client.get("/api/verdict/page_v1", headers=OWNER).json()
@@ -980,8 +983,10 @@ class TestOverallAndStats:
     def test_homepage_declutter_v25(self):
         home = client.get("/").text
         assert "стоит проверка спроса" not in home   # блок цифр снят с витрины
-        assert 'id="press"' in home and "Мы в медиа" in home
-        assert "href=" not in home.split('id="press"')[1].split("</section>")[0]  # пресса пока без ссылок
+        # "Мы в медиа" без реальных ссылок ("добавим позже") читается как
+        # пустое обещание, а не социальное доказательство -- убрали совсем,
+        # вернём, когда появятся настоящие публикации.
+        assert "Мы в медиа" not in home
 
     def test_homepage_has_single_social_proof_number(self):
         """Одна честная живая цифра вместо пустоты — не выдуманный счётчик,
@@ -1118,8 +1123,17 @@ class TestResultFunnel:
     def test_steps_without_data_excluded_from_order(self):
         """Пустые scores/competitors не рисуют шаг вовсе -- STEP_ORDER их не включает."""
         text = client.get(f"/r/{self._make_check(scores=[], overall=None, competitors={'found': None, 'top': []})}").text
-        assert "hasScores ? 2 : null" in text            # логика исключения шага в разметке присутствует
-        assert "hasComp ? 3 : null" in text
+        assert "hasComp ? 2 : null" in text            # логика исключения шага в разметке присутствует
+        assert "hasScores ? 3 : null" in text
+
+    def test_competitors_named_clearly_and_come_before_score(self):
+        """По кастдев-фидбеку: «Кто уже отвечает на этот спрос» -- непонятное
+        имя раздела, конкурентов надо смотреть раньше синтезирующей оценки,
+        а не между сырым спросом и ей."""
+        text = client.get(f"/r/{self._make_check()}").text
+        assert "Кто уже отвечает на этот спрос" not in text
+        assert "Конкуренты" in text
+        assert text.index("Конкуренты") < text.index("Оценка идеи")
 
 
 class TestPayments:
@@ -1133,7 +1147,7 @@ class TestPayments:
             return "pay_x", "https://yookassa.example/pay"
         monkeypatch.setattr(m.payments, "configured", lambda: True)
         monkeypatch.setattr(m.payments, "create_payment", fake_create_payment)
-        r = client.post("/api/live-test", json={"contact": "@no_check_id"})
+        r = client.post("/api/live-test", json={"contact": "no_check_id@example.com"})
         assert r.status_code == 200
         assert captured["return_url"].endswith("/?paid=1")
         assert "/r/" not in captured["return_url"]
@@ -1146,7 +1160,7 @@ class TestPayments:
             return "pay_y", "https://yookassa.example/pay"
         monkeypatch.setattr(m.payments, "configured", lambda: True)
         monkeypatch.setattr(m.payments, "create_payment", fake_create_payment)
-        r = client.post("/api/live-test", json={"check_id": 42, "contact": "@with_check_id"})
+        r = client.post("/api/live-test", json={"check_id": 42, "contact": "with_check_id@example.com"})
         assert r.status_code == 200
         assert captured["return_url"].endswith("/r/42?paid=1")
 
@@ -1177,6 +1191,14 @@ class TestPayments:
         assert receipt["items"][0]["vat_code"] == 1
         assert receipt["customer"]["email"] == "user@example.com"
 
+    def test_valid_receipt_contact_accepts_email_and_phone_rejects_telegram(self):
+        from app.payments import valid_receipt_contact
+        assert valid_receipt_contact("user@example.com") is True
+        assert valid_receipt_contact("+7 999 123-45-67") is True
+        assert valid_receipt_contact("@telegram_handle") is False
+        assert valid_receipt_contact("просто текст") is False
+        assert valid_receipt_contact("") is False
+
     def test_receipt_without_email_or_phone_omits_customer(self):
         """contact = телеграм-хэндл -- чек всё равно валиден (есть items),
         просто без адресата доставки, который ЮКасса не примет как email/phone."""
@@ -1188,6 +1210,45 @@ class TestPayments:
         asyncio.run(create_payment(7, 990, "Создатель · отчёт", "https://x/report/1?paid=1",
                                    contact="@telegram_handle", _post=post))
         assert "customer" not in captured["receipt"]
+
+    def test_live_test_rejects_telegram_only_contact_when_payments_configured(self, monkeypatch):
+        """Регрессия: этот магазин ЮКассы отклоняет платёж без customer.email
+        /customer.phone в чеке -- значит телеграм-хэндл больше не годится для
+        платного заказа, и мы обязаны сказать об этом ДО похода в ЮКассу,
+        а не вернуть пользователю 502 после чужого 400."""
+        import app.main as m
+        monkeypatch.setattr(m.payments, "configured", lambda: True)
+        async def should_not_be_called(*a, **kw):
+            raise AssertionError("create_payment не должен вызываться с невалидным контактом")
+        monkeypatch.setattr(m.payments, "create_payment", should_not_be_called)
+        r = client.post("/api/live-test", json={"contact": "@telegram_handle"})
+        assert r.status_code == 400
+        assert "почта или телефон" in r.json()["error"].lower()
+
+    def test_live_test_telegram_contact_ok_without_payments_configured(self, monkeypatch):
+        """Без настроенной кассы -- заявка без оплаты, чек не создаётся,
+        телеграм остаётся нормальным способом связи."""
+        import app.main as m
+        monkeypatch.setattr(m.payments, "configured", lambda: False)
+        r = client.post("/api/live-test", json={"contact": "@telegram_handle"})
+        assert r.status_code == 200 and r.json()["ok"] is True
+
+    def test_report_rejects_telegram_only_contact_when_payments_configured(self, monkeypatch):
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "тест", "count": 100}],
+                    "verdict": {"level": "unknown", "text": ""}, "competitors": {"found": None, "top": []},
+                    "scores": [], "overall": None}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            rid = client.post("/api/demand", json={"idea": "Идея достаточно длинная для проверки контакта"}).json()["id"]
+        finally:
+            m.check_demand = orig
+        monkeypatch.setattr(m.payments, "configured", lambda: True)
+        r = client.post("/api/report", json={"check_id": rid, "tier": "quick", "contact": "@telegram_handle"})
+        assert r.status_code == 400
+        assert "почта или телефон" in r.json()["error"].lower()
 
     def test_webhook_marks_order_paid_only_after_verification(self, monkeypatch):
         import app.main as m
@@ -1205,6 +1266,49 @@ class TestPayments:
         assert r.status_code == 200
         with Session(engine) as s:
             assert s.get(LiveTestOrder, oid).status == "paid"
+
+    def test_webhook_auto_launches_project_when_full_offer_chosen(self, monkeypatch):
+        """Полный оффер (не только angle/h1/sub) сохранён на /r/ -- при оплате
+        проект должен запуститься сам, без ручного /api/launch владельцем,
+        и сразу быть привязан к покупателю по contact."""
+        import app.main as m
+        from app.main import LiveTestOrder, SmokeProject, Session, engine, select
+        chosen = dict(VALID_OFFER, idea_id="autolaunch_v1", product_name="АвтоЗапуск")
+        with Session(engine) as s:
+            order = LiveTestOrder(idea="и", contact="auto@example.com", status="pending_payment",
+                                  payment_id="pay_auto", amount=1490,
+                                  chosen_offer=json.dumps(chosen, ensure_ascii=False))
+            s.add(order); s.commit(); s.refresh(order); oid = order.id
+        async def fake_fetch(pid, **kw):
+            return {"status": "succeeded", "metadata": {"order_id": str(oid)}}
+        monkeypatch.setattr(m.payments, "fetch_payment", fake_fetch)
+        r = client.post("/api/yookassa/webhook",
+                        json={"event": "payment.succeeded", "object": {"id": "pay_auto"}})
+        assert r.status_code == 200
+        with Session(engine) as s:
+            order = s.get(LiveTestOrder, oid)
+            assert order.status == "paid"
+            assert order.idea_id == "autolaunch_v1"
+            proj = s.exec(select(SmokeProject).where(SmokeProject.idea_id == "autolaunch_v1")).first()
+            assert proj is not None
+            assert proj.contact == "auto@example.com"
+
+    def test_webhook_does_not_autolaunch_without_chosen_offer(self, monkeypatch):
+        """Пропустили заострение на /r/ -- chosen_offer пуст, проект не
+        запускается сам (нет данных для лендинга), владелец делает это вручную."""
+        import app.main as m
+        from app.main import LiveTestOrder, SmokeProject, Session, engine, select
+        with Session(engine) as s:
+            order = LiveTestOrder(idea="и", contact="skip@example.com", status="pending_payment",
+                                  payment_id="pay_skip", amount=1490, chosen_offer="")
+            s.add(order); s.commit(); s.refresh(order); oid = order.id
+        async def fake_fetch(pid, **kw):
+            return {"status": "succeeded", "metadata": {"order_id": str(oid)}}
+        monkeypatch.setattr(m.payments, "fetch_payment", fake_fetch)
+        client.post("/api/yookassa/webhook", json={"event": "payment.succeeded", "object": {"id": "pay_skip"}})
+        with Session(engine) as s:
+            assert s.get(LiveTestOrder, oid).idea_id is None
+            assert s.exec(select(SmokeProject).where(SmokeProject.contact == "skip@example.com")).first() is None
 
     def test_webhook_ignores_unverified(self, monkeypatch):
         import app.main as m
@@ -1278,6 +1382,27 @@ class TestSharpenPublic:
         text = client.get(f"/r/{rid}").text
         assert "/api/sharpen" in text
         assert "Заострим идею" in text
+
+    def test_sharpen_cards_render_audience_and_labeled_pain(self):
+        """По кастдев-фидбеку: варианты заострения были неразличимы -- eyebrow
+        (аудитория) уже генерируется offer_engine, но раньше не рендерился;
+        боль теперь явно подписана, а не голым текстом под заголовком."""
+        text = client.get(f"/r/{self._make_check_for_sharpen()}").text
+        assert "o.eyebrow" in text and "Для кого:" in text
+        assert "Боль:" in text
+
+    def _make_check_for_sharpen(self):
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "а", "count": 1}], "best_phrase": "а",
+                    "verdict": {"level": "weak", "text": ""}, "competitors": {"found": None, "top": []},
+                    "scores": [], "overall": None}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            return client.post("/api/demand", json={"idea": "Идея для проверки карточек заострения"}).json()["id"]
+        finally:
+            m.check_demand = orig
 
 
 class TestReportFlow:
@@ -1620,3 +1745,355 @@ class TestYandexMetrika:
         # старый баг: условие пускало поллер повторно после reload по quick-тарифу
         # и страница перезагружалась раз в 2с бесконечно
         assert "UNLOCKED_TIER !== 'full'" not in text
+
+
+class TestMailer:
+    """SMTP-обёртка -- тот же паттерн инъекции, что payments.py/llm_adapter.py."""
+
+    def test_not_configured_without_env(self, monkeypatch):
+        from app import mailer
+        monkeypatch.delenv("SOZDATEL_SMTP_HOST", raising=False)
+        assert mailer.configured() is False
+
+    def test_configured_with_all_three_env_vars(self, monkeypatch):
+        from app import mailer
+        monkeypatch.setenv("SOZDATEL_SMTP_HOST", "mail.hosting.reg.ru")
+        monkeypatch.setenv("SOZDATEL_SMTP_USER", "noreply@projectsozdatel.ru")
+        monkeypatch.setenv("SOZDATEL_SMTP_PASSWORD", "x")
+        assert mailer.configured() is True
+
+    def test_send_without_config_and_without_injection_raises(self, monkeypatch):
+        from app import mailer
+        monkeypatch.delenv("SOZDATEL_SMTP_HOST", raising=False)
+        with pytest.raises(mailer.MailerError):
+            mailer.send("x@example.com", "тема", "текст")
+
+    def test_send_via_injection(self):
+        from app import mailer
+        captured = {}
+        def fake_send(msg):
+            captured["to"] = msg["To"]; captured["subject"] = msg["Subject"]
+            captured["body"] = msg.get_content()
+        mailer.send("user@example.com", "Вход", "текст письма", _send=fake_send)
+        assert captured["to"] == "user@example.com"
+        assert captured["subject"] == "Вход"
+        assert "текст письма" in captured["body"]
+
+
+class TestAccountCabinet:
+    """Личный кабинет покупателя: magic-link на почту вместо пароля."""
+
+    def test_request_link_rejects_bad_email(self):
+        r = client.post("/api/account/request-link", json={"contact": "@telegram_handle"})
+        assert r.status_code == 400
+
+    def test_request_link_503_when_mailer_not_configured(self, monkeypatch):
+        import app.main as m
+        monkeypatch.setattr(m.mailer, "configured", lambda: False)
+        r = client.post("/api/account/request-link", json={"contact": "user@example.com"})
+        assert r.status_code == 503
+
+    def test_request_link_sends_email_with_token_url(self, monkeypatch):
+        import app.main as m
+        monkeypatch.setattr(m.mailer, "configured", lambda: True)
+        captured = {}
+        def fake_send(to, subject, body, **kw):
+            captured["to"] = to; captured["body"] = body
+        monkeypatch.setattr(m.mailer, "send", fake_send)
+        r = client.post("/api/account/request-link", json={"contact": "User@Example.com"})
+        assert r.status_code == 200 and r.json()["ok"] is True
+        assert captured["to"] == "user@example.com"   # нормализуем регистр
+        assert "/account/verify?token=" in captured["body"]
+
+    def test_request_link_surfaces_mailer_error(self, monkeypatch):
+        import app.main as m
+        from app.mailer import MailerError
+        monkeypatch.setattr(m.mailer, "configured", lambda: True)
+        def failing(to, subject, body, **kw):
+            raise MailerError("Не получилось отправить письмо. Попробуйте ещё раз через минуту.")
+        monkeypatch.setattr(m.mailer, "send", failing)
+        r = client.post("/api/account/request-link", json={"contact": "user@example.com"})
+        assert r.status_code == 502
+
+    def _issue_session(self, monkeypatch, contact):
+        """Создаёт magic-link токен напрямую в БД и проходит верификацию --
+        короче, чем гонять письмо через инъекцию ради одного токена."""
+        import app.main as m
+        from app.main import MagicLinkToken, Session, engine
+        with Session(engine) as s:
+            s.add(MagicLinkToken(token="tok_" + contact, contact=contact))
+            s.commit()
+        r = client.get(f"/account/verify?token=tok_{contact}", follow_redirects=False)
+        assert r.status_code in (302, 307)
+        return r.cookies.get("sozdatel_session")
+
+    def test_verify_rejects_unknown_token(self):
+        r = client.get("/account/verify?token=does-not-exist", follow_redirects=False)
+        assert r.status_code == 400
+
+    def test_verify_rejects_reused_token(self, monkeypatch):
+        session_token = self._issue_session(monkeypatch, "reuse@example.com")
+        assert session_token
+        # тот же токен второй раз -- уже использован
+        r = client.get("/account/verify?token=tok_reuse@example.com", follow_redirects=False)
+        assert r.status_code == 400
+        client.cookies.clear()
+
+    def test_verify_rejects_expired_token(self, monkeypatch):
+        import app.main as m
+        from app.main import MagicLinkToken, Session, engine, utcnow
+        from datetime import timedelta
+        with Session(engine) as s:
+            s.add(MagicLinkToken(token="tok_expired", contact="old@example.com",
+                                 created_at=utcnow() - timedelta(minutes=m.MAGIC_LINK_TTL_MINUTES + 1)))
+            s.commit()
+        r = client.get("/account/verify?token=tok_expired", follow_redirects=False)
+        assert r.status_code == 400
+
+    def test_me_without_cookie_returns_no_contact(self):
+        client.cookies.clear()
+        r = client.get("/api/account/me")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["contact"] is None and d["projects"] == [] and d["reports"] == []
+
+    def test_me_lists_only_this_contacts_projects_and_paid_reports(self, monkeypatch):
+        import app.main as m
+        from app.main import SmokeProject, ReportPurchase, Session, engine
+        contact = "cabinet_test@example.com"
+        with Session(engine) as s:
+            s.add(SmokeProject(idea_id="cab_proj_v1", product_name="КабинетТест",
+                               idea_text="т", offer_json="{}", landing_html="<title></title>",
+                               contact=contact))
+            s.add(SmokeProject(idea_id="cab_proj_other_v1", product_name="ЧужойПроект",
+                               idea_text="т", offer_json="{}", landing_html="<title></title>",
+                               contact="other@example.com"))
+            s.add(ReportPurchase(idea="идея с отчётом", tier="full", contact=contact,
+                                 status="paid", check_id=None))
+            s.add(ReportPurchase(idea="неоплаченный", tier="quick", contact=contact,
+                                 status="pending_payment", check_id=None))
+            s.commit()
+
+        session_token = self._issue_session(monkeypatch, contact)
+        client.cookies.set("sozdatel_session", session_token)
+        r = client.get("/api/account/me")
+        client.cookies.clear()
+        assert r.status_code == 200
+        d = r.json()
+        assert d["contact"] == contact
+        assert [p["idea_id"] for p in d["projects"]] == ["cab_proj_v1"]
+        # Оба отчёта, не только оплаченный -- незавершённая покупка не должна
+        # пропадать из кабинета, человек мог просто закрыть вкладку с оплатой.
+        assert len(d["reports"]) == 2
+        by_idea = {r["idea"]: r["status"] for r in d["reports"]}
+        assert by_idea["идея с отчётом"] == "paid"
+        assert by_idea["неоплаченный"] == "pending_payment"
+        # Та же карточка, что видит владелец в /api/cabinet -- этап, вердикт,
+        # прогресс, а не голая ссылка (по фидбеку: "какой-то ты страшненький
+        # кабинет сделал", нужны те же карты, что в /desk).
+        proj = d["projects"][0]
+        for key in ("stage", "stage_name", "views", "leads", "rate", "target", "verdict", "next_step", "progress"):
+            assert key in proj, f"в карточке проекта личного кабинета нет поля {key}"
+
+    def test_me_shows_pending_live_test_orders_not_yet_launched(self, monkeypatch):
+        """Заявка на живой тест без запущенного проекта (idea_id пуст) должна
+        быть видна в кабинете -- иначе человек, начавший что-то, но не
+        доведший до конца, теряет к этому доступ."""
+        import app.main as m
+        from app.main import LiveTestOrder, Session, engine
+        contact = "pending_order@example.com"
+        with Session(engine) as s:
+            s.add(LiveTestOrder(idea="идея без запуска", contact=contact,
+                                status="pending_payment", check_id=77))
+            s.commit()
+        session_token = self._issue_session(monkeypatch, contact)
+        client.cookies.set("sozdatel_session", session_token)
+        r = client.get("/api/account/me")
+        client.cookies.clear()
+        d = r.json()
+        assert len(d["orders"]) == 1
+        assert d["orders"][0]["idea"] == "идея без запуска"
+        assert d["orders"][0]["status"] == "pending_payment"
+        assert d["orders"][0]["continue_url"] == "/r/77"
+
+    def test_me_hides_launched_order_from_orders_list(self, monkeypatch):
+        """Заявка уже стала проектом (idea_id проставлен) -- показывается
+        один раз как карточка проекта, не дублируется в orders."""
+        import app.main as m
+        from app.main import LiveTestOrder, SmokeProject, Session, engine
+        contact = "already_launched@example.com"
+        with Session(engine) as s:
+            s.add(SmokeProject(idea_id="already_launched_v1", product_name="Уже",
+                               idea_text="т", offer_json="{}", landing_html="<title></title>",
+                               contact=contact))
+            s.add(LiveTestOrder(idea="и", contact=contact, status="paid", idea_id="already_launched_v1"))
+            s.commit()
+        session_token = self._issue_session(monkeypatch, contact)
+        client.cookies.set("sozdatel_session", session_token)
+        d = client.get("/api/account/me").json()
+        client.cookies.clear()
+        assert len(d["orders"]) == 0
+        assert [p["idea_id"] for p in d["projects"]] == ["already_launched_v1"]
+
+    def test_pending_payment_expires_after_timeout(self):
+        """Брошенная оплата (закрыл вкладку, не оплатил) не должна вечно
+        висеть "ожидает оплаты" -- владелец предложил таймаут."""
+        import app.main as m
+        from datetime import timedelta
+        fresh = m._effective_status("pending_payment", m.utcnow())
+        stale = m._effective_status("pending_payment", m.utcnow() - timedelta(minutes=m.PENDING_PAYMENT_TIMEOUT_MINUTES + 1))
+        assert fresh == "pending_payment"
+        assert stale == "expired"
+        # paid/new не истекают -- таймаут применим только к незавершённой оплате
+        assert m._effective_status("paid", m.utcnow() - timedelta(days=30)) == "paid"
+
+    def test_orders_endpoint_shows_expired_and_launched_state(self, monkeypatch):
+        """Владелец в /desk должен видеть, что заказ уже запущен (ссылка на
+        проект) или истёк (не "ожидает оплаты" бесконечно)."""
+        from app.main import LiveTestOrder, Session, engine, utcnow
+        from datetime import timedelta
+        with Session(engine) as s:
+            s.add(LiveTestOrder(idea="запущенный", contact="a@example.com", status="paid",
+                                idea_id="orders_launched_v1"))
+            s.add(LiveTestOrder(idea="протух", contact="b@example.com", status="pending_payment",
+                                created_at=utcnow() - timedelta(minutes=999)))
+            s.commit()
+        d = client.get("/api/orders", headers=OWNER).json()
+        by_idea = {o["idea"]: o for o in d["orders"]}
+        assert by_idea["запущенный"]["project_url"] == "/p/orders_launched_v1"
+        assert by_idea["протух"]["status"] == "expired"
+
+    def test_logout_clears_cookie(self):
+        r = client.post("/api/account/logout")
+        assert r.status_code == 200
+        assert r.cookies.get("sozdatel_session") is None
+
+    def test_account_page_loads(self):
+        r = client.get("/account")
+        assert r.status_code == 200
+        assert "Личный" in r.text
+
+    def test_owner_can_attach_contact_to_project(self):
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="contact_attach_v1", product_name="ПрикреплениеКонтакта")})
+        r = client.patch("/api/projects/contact_attach_v1/contact", headers=OWNER,
+                         json={"contact": "attached@example.com"})
+        assert r.status_code == 200
+        from app.main import SmokeProject, Session, engine, select
+        with Session(engine) as s:
+            proj = s.exec(select(SmokeProject).where(SmokeProject.idea_id == "contact_attach_v1")).first()
+            assert proj.contact == "attached@example.com"
+
+    def test_attach_contact_requires_owner_key(self):
+        r = client.patch("/api/projects/whatever/contact", json={"contact": "x@example.com"})
+        assert r.status_code == 401
+
+
+class TestAutoLaunchUiWiring:
+    """Статическая проверка, что новые состояния заказа (запущено само /
+    нужно запустить вручную) отражены в JS /desk и /account, а не только
+    в API -- иначе владелец видит те же данные, что и раньше."""
+
+    def test_desk_orders_js_handles_project_url_and_manual_fallback(self):
+        text = (main_module.BASE_DIR.parent / "static" / "desk.html").read_text()
+        assert "o.project_url" in text
+        assert "заострение пропустили" in text.lower()
+
+    def test_account_page_renders_pending_orders_block(self):
+        text = (main_module.BASE_DIR.parent / "static" / "account.html").read_text()
+        assert 'id="orders-block"' in text
+        assert "continue_url" in text
+
+
+class TestCustomerDevPass:
+    """Правки по критическому проходу владельца как customer developer перед
+    запуском рекламы: порядок финального CTA, длина плейсхолдеров на мобильном,
+    /p/{id} без тупика в owner-only /desk, публичная навигация не ведёт в /desk."""
+
+    def test_live_test_cta_comes_before_report_alt_path(self):
+        """"Дальше" -- основной путь, должен идти раньше своей альтернативы
+        ("Или получите отчёт"), иначе "или" читается раньше того, к чему оно
+        относится."""
+        import app.main as m
+        async def fake_check(idea):
+            return {"formulations": [{"phrase": "тест", "count": 100}],
+                    "verdict": {"level": "strong", "text": "Спрос есть"},
+                    "competitors": {"found": 10, "top": [{"title": "Т", "domain": "t.ru"}]},
+                    "scores": [{"key": "demand", "label": "Спрос", "value": 7, "note": ""}],
+                    "overall": {"value": 7, "weakest": ""}}
+        orig = m.check_demand
+        m.check_demand = fake_check
+        try:
+            rid = client.post("/api/demand", json={"idea": "Идея достаточно длинная для проверки порядка CTA"}).json()["id"]
+        finally:
+            m.check_demand = orig
+        text = client.get(f"/r/{rid}").text
+        assert text.index('id="order"') < text.index('class="alt-path"')
+
+    def test_contact_placeholders_short_enough_for_mobile(self):
+        """Длинные плейсхолдеры («Телеграм/почта — на них пришлём чек и
+        результат») визуально обрезались в узком инпуте на мобильном --
+        держим короче того, что реально помещается."""
+        import re
+        for path, static_name in (("static/result.html", "result.html"),
+                                   ("static/report.html", "report.html"),
+                                   ("static/account.html", "account.html")):
+            text = (main_module.BASE_DIR.parent / path).read_text()
+            for m_ in re.finditer(r'placeholder="([^"]*)"', text):
+                assert len(m_.group(1)) <= 30, f"плейсхолдер длиннее 30 символов в {static_name}: {m_.group(1)!r}"
+
+    def test_project_page_has_no_dead_end_to_owner_desk(self):
+        """/p/{id} публичный (не за owner-key) -- личный кабинет покупателя
+        теперь на него ссылается, поэтому свои же "Кабинет →"/"← портфель"
+        не должны вести в /desk, куда у покупателя нет доступа."""
+        client.post("/api/launch", headers=OWNER, json={"idea_text": "т",
+            "offer": dict(VALID_OFFER, idea_id="no_deadend_v1", product_name="БезТупика")})
+        text = client.get("/p/no_deadend_v1").text
+        assert 'href="/desk"' not in text
+
+    def test_homepage_cabinet_link_points_to_customer_account(self):
+        home = client.get("/").text
+        assert 'href="/account"' in home
+        assert 'href="/desk"' not in home
+
+    def test_ad_setup_copy_does_not_overpromise_managed_service(self):
+        """Владелец подтвердил: рекламу пока никому не настраивают -- клиент
+        запускает Директ сам по инструкции. "Мы... сами запустим рекламу"
+        обещало управляемую услугу, которой нет; текст не должен утверждать,
+        что Создатель лично запускает кампанию."""
+        home = client.get("/").text
+        assert "Запускаем Яндекс Директ" not in home
+
+        rid = TestReportFlow()._make_check()
+        result_text = client.get(f"/r/{rid}").text
+        assert "сами запустим рекламу" not in result_text
+
+    def test_no_data_wording_reads_as_finding_not_error(self):
+        """"нет данных" рядом с частотностью читалось как «сайт сломан» --
+        по фидбеку заменили на формулировку-вывод о рынке."""
+        result_text = (main_module.BASE_DIR.parent / "static" / "result.html").read_text()
+        assert '>нет данных<' not in result_text
+        assert result_text.count("почти не ищут") >= 2   # freq-row и score-cell
+        report_text = (main_module.BASE_DIR.parent / "static" / "report.html").read_text()
+        assert "'нет данных'" not in report_text
+        assert "почти не ищут" in report_text
+
+    def test_report_has_single_pricing_block_not_duplicated(self):
+        """Цены дублировались сверху и снизу отчёта -- по фидбеку нижний
+        блок оказался лишним после того, как верхний уже решает задачу
+        "не листать до конца, чтобы увидеть цену"."""
+        text = (main_module.BASE_DIR.parent / "static" / "report.html").read_text()
+        assert text.count('id="pricing') == 1   # только pricing-top, без второго id="pricing"
+
+    def test_report_preview_suppresses_weak_reformulate_advice(self):
+        """Вердикт "почти не ищут... попробуйте переформулировать" на /r/
+        уместен как шаг воронки, но на странице отчёта после того, как идею
+        уже заострили, звучит как отказ от уже принятого решения купить."""
+        text = (main_module.BASE_DIR.parent / "static" / "report.html").read_text()
+        assert "p.verdict_level !== 'weak'" in text
+
+    def test_alt_path_report_button_is_ink_not_ghost(self):
+        """"Посмотреть отчёт" был btn-ghost -- по фидбеку поднят до полного
+        чернильного веса, отчёт не второсортная опция."""
+        text = (main_module.BASE_DIR.parent / "static" / "result.html").read_text()
+        assert '<a class="btn" href="/report/__CHECK_ID__">Посмотреть отчёт</a>' in text
