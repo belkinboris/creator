@@ -71,6 +71,18 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+# Оплата не пришла за это время -- считаем попытку брошенной. Вычисляется на
+# лету при чтении (created_at + порог < сейчас), не мутирует БД: ни воркеров,
+# ни крона нет, статус просто перестаёт звать на оплату уже неживую ссылку.
+PENDING_PAYMENT_TIMEOUT_MINUTES = 20
+
+
+def _effective_status(status: str, created_at: datetime) -> str:
+    if status == "pending_payment" and utcnow() - created_at > timedelta(minutes=PENDING_PAYMENT_TIMEOUT_MINUTES):
+        return "expired"
+    return status
+
+
 # ---------------------------------------------------------------------------
 # Модели
 # ---------------------------------------------------------------------------
@@ -128,7 +140,8 @@ class LiveTestOrder(SQLModel, table=True):
     status: str = "new"
     payment_id: str = ""
     amount: int = 0
-    chosen_offer: str = ""    # JSON: вариант позиционирования, выбранный на /r/{id}
+    chosen_offer: str = ""    # JSON: полный оффер, выбранный на /r/{id} -- см. LAUNCH_REQUIRED_FIELDS
+    idea_id: Optional[str] = None   # проставляется автозапуском/владельцем -- ссылка на запущенный SmokeProject
 
 
 class ReportPurchase(SQLModel, table=True):
@@ -186,6 +199,7 @@ try:  # create_all не добавляет колонки в существую�
         _c.execute(_sqltext("ALTER TABLE demandcheck ADD COLUMN IF NOT EXISTS result_json VARCHAR DEFAULT ''"))
         _c.execute(_sqltext("ALTER TABLE livetestorder ADD COLUMN IF NOT EXISTS chosen_offer VARCHAR DEFAULT ''"))
         _c.execute(_sqltext("ALTER TABLE smokeproject ADD COLUMN IF NOT EXISTS contact VARCHAR DEFAULT ''"))
+        _c.execute(_sqltext("ALTER TABLE livetestorder ADD COLUMN IF NOT EXISTS idea_id VARCHAR"))
         _c.commit()
 except Exception:  # sqlite в тестах создаёт таблицу сразу с колонкой -- это норма
     pass
@@ -347,7 +361,9 @@ async def live_test_order(data: LiveTestIn, request: Request):
     if payments.configured() and not payments.valid_receipt_contact(contact):
         return JSONResponse({"ok": False, "error": "Для оплаты нужна почта или телефон — на них пришлём чек. Телеграм для этого не подходит."}, status_code=400)
     idea = ""
-    chosen_offer_json = json.dumps(data.chosen_offer, ensure_ascii=False)[:2000] if data.chosen_offer else ""
+    # Полный оффер (не только angle/h1/sub) -- нужен целиком для автозапуска
+    # проекта сразу при оплате, см. LAUNCH_REQUIRED_FIELDS и yookassa_webhook.
+    chosen_offer_json = json.dumps(data.chosen_offer, ensure_ascii=False)[:6000] if data.chosen_offer else ""
     with Session(engine) as s:
         if data.check_id:
             rec = s.get(DemandCheck, data.check_id)
@@ -399,6 +415,21 @@ async def yookassa_webhook(request: Request):
             order = s.get(model, int(order_id)) if order_id else None
             if order and order.status != "paid":
                 order.status = "paid"; s.add(order); s.commit()
+            # Автозапуск: если на /r/ выбрали заострённый вариант (полный
+            # оффер, не только angle/h1/sub -- см. pickOffer в result.html),
+            # запускаем проект сразу при оплате, без ручного вмешательства
+            # владельца. contact уже есть в заказе -- проект сразу виден
+            # покупателю в /account. Идеи без выбранного варианта (пропустили
+            # заострение) по-прежнему запускает владелец вручную.
+            if kind == "livetest" and isinstance(order, LiveTestOrder) and not order.idea_id and order.chosen_offer:
+                try:
+                    offer = json.loads(order.chosen_offer)
+                except Exception:
+                    offer = None
+                if isinstance(offer, dict) and all(offer.get(k) for k in LAUNCH_REQUIRED_FIELDS):
+                    proj = _launch_offer(s, offer, order.idea, contact=order.contact)
+                    order.idea_id = proj.idea_id
+                    s.add(order); s.commit()
     except Exception:
         logging.getLogger(__name__).warning("webhook order update failed", exc_info=True)
     return {"ok": True}
@@ -551,7 +582,9 @@ def orders_list(request: Request):
     with Session(engine) as s:
         rows = s.exec(select(LiveTestOrder)).all()
     return {"orders": [{"id": o.id, "created_at": str(o.created_at), "idea": o.idea,
-                        "contact": o.contact, "status": o.status, "amount": o.amount,
+                        "contact": o.contact, "status": _effective_status(o.status, o.created_at),
+                        "amount": o.amount, "idea_id": o.idea_id,
+                        "project_url": f"/p/{o.idea_id}" if o.idea_id else None,
                         "chosen_offer": json.loads(o.chosen_offer) if o.chosen_offer else None}
                        for o in reversed(rows)]}
 
@@ -611,33 +644,48 @@ class LaunchIn(BaseModel):
     offer: dict
 
 
+# Обязательные поля оффера для запуска -- общие для ручного /api/launch
+# владельца и автозапуска сразу после оплаты живого теста (см. yookassa_webhook).
+LAUNCH_REQUIRED_FIELDS = ("idea_id", "product_name", "h1", "sub", "pains",
+                          "demo_left_label", "demo_left_text", "demo_right_text", "eyebrow")
+
+
+def _launch_offer(s: Session, offer: dict, idea_text: str, contact: str = "") -> SmokeProject:
+    """Общая логика запуска проекта -- вызывающая сторона уже проверила
+    LAUNCH_REQUIRED_FIELDS. contact, если передан, привязывает проект к
+    покупателю сразу (виден в его /account без ручного PATCH владельцем)."""
+    html = render_landing(offer)
+    existing = s.exec(select(SmokeProject).where(SmokeProject.idea_id == offer["idea_id"])).first()
+    if existing:
+        existing.landing_html = html
+        existing.offer_json = json.dumps(offer, ensure_ascii=False)
+        if contact:
+            existing.contact = contact
+        s.add(existing); s.commit()
+        return existing
+    proj = SmokeProject(
+        idea_id=offer["idea_id"], product_name=offer["product_name"],
+        idea_text=idea_text[:2000],
+        offer_json=json.dumps(offer, ensure_ascii=False),
+        landing_html=html,
+        click_target=int(offer.get("click_target", 40)),
+        lead_rate_signal=float(offer.get("lead_rate_signal", 0.08)),
+        lead_rate_dead=float(offer.get("lead_rate_dead", 0.04)),
+        contact=contact,
+    )
+    s.add(proj); s.commit(); s.refresh(proj)
+    return proj
+
+
 @app.post("/api/launch")
 def launch(data: LaunchIn, request: Request):
     _check_owner(request)
     offer = data.offer
-    for key in ("idea_id", "product_name", "h1", "sub", "pains",
-                "demo_left_label", "demo_left_text", "demo_right_text", "eyebrow"):
+    for key in LAUNCH_REQUIRED_FIELDS:
         if not offer.get(key):
             raise HTTPException(400, f"в оффере нет поля {key}")
-    html = render_landing(offer)
     with Session(engine) as s:
-        existing = s.exec(select(SmokeProject).where(SmokeProject.idea_id == offer["idea_id"])).first()
-        if existing:
-            existing.landing_html = html
-            existing.offer_json = json.dumps(offer, ensure_ascii=False)
-            s.add(existing); s.commit()
-            proj = existing
-        else:
-            proj = SmokeProject(
-                idea_id=offer["idea_id"], product_name=offer["product_name"],
-                idea_text=data.idea_text[:2000],
-                offer_json=json.dumps(offer, ensure_ascii=False),
-                landing_html=html,
-                click_target=int(offer.get("click_target", 40)),
-                lead_rate_signal=float(offer.get("lead_rate_signal", 0.08)),
-                lead_rate_dead=float(offer.get("lead_rate_dead", 0.04)),
-            )
-            s.add(proj); s.commit(); s.refresh(proj)
+        proj = _launch_offer(s, offer, data.idea_text)
     return {
         "ok": True, "idea_id": proj.idea_id,
         "landing_url": f"/l/{proj.idea_id}",
@@ -1124,13 +1172,21 @@ def _current_contact(request: Request) -> Optional[str]:
 def account_me(request: Request):
     contact = _current_contact(request)
     if not contact:
-        return {"ok": True, "contact": None, "projects": [], "reports": []}
+        return {"ok": True, "contact": None, "projects": [], "reports": [], "orders": []}
     with Session(engine) as s:
         projects = s.exec(select(SmokeProject).where(SmokeProject.contact == contact)
                           .order_by(SmokeProject.created_at.desc())).all()
-        reports = s.exec(select(ReportPurchase).where(
-            ReportPurchase.contact == contact, ReportPurchase.status == "paid"
-        ).order_by(ReportPurchase.created_at.desc())).all()
+        # Все отчёты, не только оплаченные -- начатая, но не оплаченная
+        # покупка не должна пропадать из кабинета (человек мог просто
+        # закрыть вкладку с оплатой и вернуться позже).
+        reports = s.exec(select(ReportPurchase).where(ReportPurchase.contact == contact)
+                         .order_by(ReportPurchase.created_at.desc())).all()
+        # Заявки на живой тест без запущенного проекта -- уже запущенные
+        # (idea_id проставлен) показаны выше как карточка проекта, дублировать
+        # их здесь не нужно.
+        orders = s.exec(select(LiveTestOrder).where(
+            LiveTestOrder.contact == contact, LiveTestOrder.idea_id.is_(None)
+        ).order_by(LiveTestOrder.created_at.desc())).all()
         from collections import defaultdict
         idea_ids = [p.idea_id for p in projects]
         counts: dict[tuple[str, str], int] = defaultdict(int)
@@ -1143,7 +1199,11 @@ def account_me(request: Request):
         "projects": [_smoke_card(p, counts[(p.idea_id, "page_view")],
                                  counts[(p.idea_id, "lead_submitted")]) for p in projects],
         "reports": [{"check_id": r.check_id, "idea": r.idea, "tier": r.tier,
+                     "status": _effective_status(r.status, r.created_at),
                      "report_url": f"/report/{r.check_id}"} for r in reports],
+        "orders": [{"id": o.id, "idea": o.idea, "check_id": o.check_id,
+                    "status": _effective_status(o.status, o.created_at),
+                    "continue_url": f"/r/{o.check_id}" if o.check_id else None} for o in orders],
     }
 
 

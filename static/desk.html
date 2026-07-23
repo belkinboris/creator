@@ -147,7 +147,8 @@ function stageBadge(stageIdx, name){
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-const ORDER_STATUS = {new: ["", "новая заявка"], pending_payment: ["pending", "ожидает оплаты"], paid: ["paid", "оплачено"]};
+const ORDER_STATUS = {new: ["", "новая заявка"], pending_payment: ["pending", "ожидает оплаты"],
+  expired: ["", "истекло — не оплатили"], paid: ["paid", "оплачено"]};
 async function drawSpark(canvas, ideaId){
   if(!canvas) return;
   try{
@@ -188,7 +189,13 @@ async function loadOrders(){
       </div>
       <div class="order-idea">${escapeHtml(o.idea || "—")}</div>
       <div class="order-contact">${escapeHtml(o.contact)}</div>
-      ${o.chosen_offer ? `<div class="order-offer">Выбрано позиционирование: ${escapeHtml(o.chosen_offer.h1 || "")}</div>` : ""}
+      ${o.project_url
+        ? `<div class="order-offer">Проект уже запущен <a href="${o.project_url}">→ открыть</a></div>`
+        : o.status === "paid"
+          ? `<div class="order-offer">Оплачено, но не запустилось само${o.chosen_offer && o.chosen_offer.h1 ? " (выбрано: " + escapeHtml(o.chosen_offer.h1) + ")" : " (заострение пропустили)"} — соберите и запустите вручную</div>`
+          : o.chosen_offer && o.chosen_offer.h1
+            ? `<div class="order-offer">Выбрано позиционирование: ${escapeHtml(o.chosen_offer.h1)}</div>`
+            : ""}
     </div>`;
   }).join('') + '</div>';
 }

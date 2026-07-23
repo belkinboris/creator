@@ -1267,6 +1267,49 @@ class TestPayments:
         with Session(engine) as s:
             assert s.get(LiveTestOrder, oid).status == "paid"
 
+    def test_webhook_auto_launches_project_when_full_offer_chosen(self, monkeypatch):
+        """Полный оффер (не только angle/h1/sub) сохранён на /r/ -- при оплате
+        проект должен запуститься сам, без ручного /api/launch владельцем,
+        и сразу быть привязан к покупателю по contact."""
+        import app.main as m
+        from app.main import LiveTestOrder, SmokeProject, Session, engine, select
+        chosen = dict(VALID_OFFER, idea_id="autolaunch_v1", product_name="АвтоЗапуск")
+        with Session(engine) as s:
+            order = LiveTestOrder(idea="и", contact="auto@example.com", status="pending_payment",
+                                  payment_id="pay_auto", amount=1490,
+                                  chosen_offer=json.dumps(chosen, ensure_ascii=False))
+            s.add(order); s.commit(); s.refresh(order); oid = order.id
+        async def fake_fetch(pid, **kw):
+            return {"status": "succeeded", "metadata": {"order_id": str(oid)}}
+        monkeypatch.setattr(m.payments, "fetch_payment", fake_fetch)
+        r = client.post("/api/yookassa/webhook",
+                        json={"event": "payment.succeeded", "object": {"id": "pay_auto"}})
+        assert r.status_code == 200
+        with Session(engine) as s:
+            order = s.get(LiveTestOrder, oid)
+            assert order.status == "paid"
+            assert order.idea_id == "autolaunch_v1"
+            proj = s.exec(select(SmokeProject).where(SmokeProject.idea_id == "autolaunch_v1")).first()
+            assert proj is not None
+            assert proj.contact == "auto@example.com"
+
+    def test_webhook_does_not_autolaunch_without_chosen_offer(self, monkeypatch):
+        """Пропустили заострение на /r/ -- chosen_offer пуст, проект не
+        запускается сам (нет данных для лендинга), владелец делает это вручную."""
+        import app.main as m
+        from app.main import LiveTestOrder, SmokeProject, Session, engine, select
+        with Session(engine) as s:
+            order = LiveTestOrder(idea="и", contact="skip@example.com", status="pending_payment",
+                                  payment_id="pay_skip", amount=1490, chosen_offer="")
+            s.add(order); s.commit(); s.refresh(order); oid = order.id
+        async def fake_fetch(pid, **kw):
+            return {"status": "succeeded", "metadata": {"order_id": str(oid)}}
+        monkeypatch.setattr(m.payments, "fetch_payment", fake_fetch)
+        client.post("/api/yookassa/webhook", json={"event": "payment.succeeded", "object": {"id": "pay_skip"}})
+        with Session(engine) as s:
+            assert s.get(LiveTestOrder, oid).idea_id is None
+            assert s.exec(select(SmokeProject).where(SmokeProject.contact == "skip@example.com")).first() is None
+
     def test_webhook_ignores_unverified(self, monkeypatch):
         import app.main as m
         async def fake_fetch(pid, **kw):
@@ -1839,13 +1882,86 @@ class TestAccountCabinet:
         d = r.json()
         assert d["contact"] == contact
         assert [p["idea_id"] for p in d["projects"]] == ["cab_proj_v1"]
-        assert len(d["reports"]) == 1 and d["reports"][0]["idea"] == "идея с отчётом"
+        # Оба отчёта, не только оплаченный -- незавершённая покупка не должна
+        # пропадать из кабинета, человек мог просто закрыть вкладку с оплатой.
+        assert len(d["reports"]) == 2
+        by_idea = {r["idea"]: r["status"] for r in d["reports"]}
+        assert by_idea["идея с отчётом"] == "paid"
+        assert by_idea["неоплаченный"] == "pending_payment"
         # Та же карточка, что видит владелец в /api/cabinet -- этап, вердикт,
         # прогресс, а не голая ссылка (по фидбеку: "какой-то ты страшненький
         # кабинет сделал", нужны те же карты, что в /desk).
         proj = d["projects"][0]
         for key in ("stage", "stage_name", "views", "leads", "rate", "target", "verdict", "next_step", "progress"):
             assert key in proj, f"в карточке проекта личного кабинета нет поля {key}"
+
+    def test_me_shows_pending_live_test_orders_not_yet_launched(self, monkeypatch):
+        """Заявка на живой тест без запущенного проекта (idea_id пуст) должна
+        быть видна в кабинете -- иначе человек, начавший что-то, но не
+        доведший до конца, теряет к этому доступ."""
+        import app.main as m
+        from app.main import LiveTestOrder, Session, engine
+        contact = "pending_order@example.com"
+        with Session(engine) as s:
+            s.add(LiveTestOrder(idea="идея без запуска", contact=contact,
+                                status="pending_payment", check_id=77))
+            s.commit()
+        session_token = self._issue_session(monkeypatch, contact)
+        client.cookies.set("sozdatel_session", session_token)
+        r = client.get("/api/account/me")
+        client.cookies.clear()
+        d = r.json()
+        assert len(d["orders"]) == 1
+        assert d["orders"][0]["idea"] == "идея без запуска"
+        assert d["orders"][0]["status"] == "pending_payment"
+        assert d["orders"][0]["continue_url"] == "/r/77"
+
+    def test_me_hides_launched_order_from_orders_list(self, monkeypatch):
+        """Заявка уже стала проектом (idea_id проставлен) -- показывается
+        один раз как карточка проекта, не дублируется в orders."""
+        import app.main as m
+        from app.main import LiveTestOrder, SmokeProject, Session, engine
+        contact = "already_launched@example.com"
+        with Session(engine) as s:
+            s.add(SmokeProject(idea_id="already_launched_v1", product_name="Уже",
+                               idea_text="т", offer_json="{}", landing_html="<title></title>",
+                               contact=contact))
+            s.add(LiveTestOrder(idea="и", contact=contact, status="paid", idea_id="already_launched_v1"))
+            s.commit()
+        session_token = self._issue_session(monkeypatch, contact)
+        client.cookies.set("sozdatel_session", session_token)
+        d = client.get("/api/account/me").json()
+        client.cookies.clear()
+        assert len(d["orders"]) == 0
+        assert [p["idea_id"] for p in d["projects"]] == ["already_launched_v1"]
+
+    def test_pending_payment_expires_after_timeout(self):
+        """Брошенная оплата (закрыл вкладку, не оплатил) не должна вечно
+        висеть "ожидает оплаты" -- владелец предложил таймаут."""
+        import app.main as m
+        from datetime import timedelta
+        fresh = m._effective_status("pending_payment", m.utcnow())
+        stale = m._effective_status("pending_payment", m.utcnow() - timedelta(minutes=m.PENDING_PAYMENT_TIMEOUT_MINUTES + 1))
+        assert fresh == "pending_payment"
+        assert stale == "expired"
+        # paid/new не истекают -- таймаут применим только к незавершённой оплате
+        assert m._effective_status("paid", m.utcnow() - timedelta(days=30)) == "paid"
+
+    def test_orders_endpoint_shows_expired_and_launched_state(self, monkeypatch):
+        """Владелец в /desk должен видеть, что заказ уже запущен (ссылка на
+        проект) или истёк (не "ожидает оплаты" бесконечно)."""
+        from app.main import LiveTestOrder, Session, engine, utcnow
+        from datetime import timedelta
+        with Session(engine) as s:
+            s.add(LiveTestOrder(idea="запущенный", contact="a@example.com", status="paid",
+                                idea_id="orders_launched_v1"))
+            s.add(LiveTestOrder(idea="протух", contact="b@example.com", status="pending_payment",
+                                created_at=utcnow() - timedelta(minutes=999)))
+            s.commit()
+        d = client.get("/api/orders", headers=OWNER).json()
+        by_idea = {o["idea"]: o for o in d["orders"]}
+        assert by_idea["запущенный"]["project_url"] == "/p/orders_launched_v1"
+        assert by_idea["протух"]["status"] == "expired"
 
     def test_logout_clears_cookie(self):
         r = client.post("/api/account/logout")
@@ -1871,6 +1987,22 @@ class TestAccountCabinet:
     def test_attach_contact_requires_owner_key(self):
         r = client.patch("/api/projects/whatever/contact", json={"contact": "x@example.com"})
         assert r.status_code == 401
+
+
+class TestAutoLaunchUiWiring:
+    """Статическая проверка, что новые состояния заказа (запущено само /
+    нужно запустить вручную) отражены в JS /desk и /account, а не только
+    в API -- иначе владелец видит те же данные, что и раньше."""
+
+    def test_desk_orders_js_handles_project_url_and_manual_fallback(self):
+        text = (main_module.BASE_DIR.parent / "static" / "desk.html").read_text()
+        assert "o.project_url" in text
+        assert "заострение пропустили" in text.lower()
+
+    def test_account_page_renders_pending_orders_block(self):
+        text = (main_module.BASE_DIR.parent / "static" / "account.html").read_text()
+        assert 'id="orders-block"' in text
+        assert "continue_url" in text
 
 
 class TestCustomerDevPass:

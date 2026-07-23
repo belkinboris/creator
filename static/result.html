@@ -419,14 +419,18 @@ function skipSharpen(){
 }
 
 function pickOffer(offer, btn){
-  chosenOffer = {angle: offer.angle || '', h1: stripTags(offer.h1), sub: offer.sub || ''};
+  // Полный оффер, не только angle/h1/sub -- это единственное, что позволяет
+  // запустить проект сразу при оплате, без ручного вмешательства владельца
+  // (см. LAUNCH_REQUIRED_FIELDS и автозапуск в yookassa_webhook).
+  chosenOffer = offer;
   sharpenCards.querySelectorAll('.sharp-card').forEach(c => c.classList.remove('picked'));
   sharpenCards.querySelectorAll('.sharp-pick').forEach(b => { b.textContent = 'Выбрать этот вариант'; });
   btn.closest('.sharp-card').classList.add('picked');
   btn.textContent = 'Выбрано ✓';
-  chosenNote.textContent = 'Тестируем: ' + chosenOffer.h1;
+  const displayH1 = stripTags(offer.h1);
+  chosenNote.textContent = 'Тестируем: ' + displayH1;
   chosenNote.classList.add('show');
-  advance(4, 'Выбрано: ' + chosenOffer.h1);
+  advance(4, 'Выбрано: ' + displayH1);
 }
 
 function renderSharpen(offers){
