@@ -1935,3 +1935,33 @@ class TestCustomerDevPass:
         rid = TestReportFlow()._make_check()
         result_text = client.get(f"/r/{rid}").text
         assert "сами запустим рекламу" not in result_text
+
+    def test_no_data_wording_reads_as_finding_not_error(self):
+        """"нет данных" рядом с частотностью читалось как «сайт сломан» --
+        по фидбеку заменили на формулировку-вывод о рынке."""
+        result_text = (main_module.BASE_DIR.parent / "static" / "result.html").read_text()
+        assert '>нет данных<' not in result_text
+        assert result_text.count("почти не ищут") >= 2   # freq-row и score-cell
+        report_text = (main_module.BASE_DIR.parent / "static" / "report.html").read_text()
+        assert "'нет данных'" not in report_text
+        assert "почти не ищут" in report_text
+
+    def test_report_has_single_pricing_block_not_duplicated(self):
+        """Цены дублировались сверху и снизу отчёта -- по фидбеку нижний
+        блок оказался лишним после того, как верхний уже решает задачу
+        "не листать до конца, чтобы увидеть цену"."""
+        text = (main_module.BASE_DIR.parent / "static" / "report.html").read_text()
+        assert text.count('id="pricing') == 1   # только pricing-top, без второго id="pricing"
+
+    def test_report_preview_suppresses_weak_reformulate_advice(self):
+        """Вердикт "почти не ищут... попробуйте переформулировать" на /r/
+        уместен как шаг воронки, но на странице отчёта после того, как идею
+        уже заострили, звучит как отказ от уже принятого решения купить."""
+        text = (main_module.BASE_DIR.parent / "static" / "report.html").read_text()
+        assert "p.verdict_level !== 'weak'" in text
+
+    def test_alt_path_report_button_is_ink_not_ghost(self):
+        """"Посмотреть отчёт" был btn-ghost -- по фидбеку поднят до полного
+        чернильного веса, отчёт не второсортная опция."""
+        text = (main_module.BASE_DIR.parent / "static" / "result.html").read_text()
+        assert '<a class="btn" href="/report/__CHECK_ID__">Посмотреть отчёт</a>' in text
